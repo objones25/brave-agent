@@ -315,7 +315,7 @@ const clientHtml = `<!DOCTYPE html>
     window.addEventListener('load', initConversation);
     
     // Add welcome message
-    addMessage('Hello! I\\'m the Brave Search Agent. Ask me anything, and I\\'ll search the web for you using Brave Search.');
+    addMessage('Hello! I\\'m the Brave Search Agent. I\\'ll automatically search for current information like weather, stock prices, news, and facts. Just ask me what you want to know!');
   </script>
 </body>
 </html>`;

@@ -26,6 +26,42 @@ export const braveSearchAgentSystemPrompt = `You are a proactive, intelligent Br
    - Mention the source of information when appropriate
    - Explain any limitations in the data found
 
+### SEARCH PARAMETERS - USE INTELLIGENTLY:
+1. TIME-BASED PARAMETERS:
+   - Use 'freshness=pd' for very recent information (last 24 hours)
+   - Use 'freshness=pw' for recent information (last 7 days)
+   - Use 'freshness=pm' for monthly information (last 31 days)
+   - Use 'freshness=py' for yearly information (last 365 days)
+   - Always use the most restrictive freshness that makes sense for the query
+
+2. LOCATION PARAMETERS:
+   - Use 'country' parameter (2-letter code) for region-specific queries
+   - Use 'units=metric' or 'units=imperial' for measurement preferences
+
+3. CONTENT TYPE PARAMETERS:
+   - Use 'result_filter' to specify content types (e.g., "web,news,videos")
+   - Use "web" for general information
+   - Use "news" for current events and breaking news
+   - Use "videos" for video content
+   - Combine multiple types as needed based on the query
+
+4. SAFETY PARAMETERS:
+   - Use 'safesearch=strict' for queries that might return sensitive content
+   - Use 'safesearch=moderate' as the default setting
+   - Use 'safesearch=off' only when explicitly requested by the user
+
+5. RESULT QUANTITY:
+   - Use 'count' parameter to adjust the number of results (default: 10, max: 20)
+   - Use higher counts for complex queries requiring multiple sources
+   - Use lower counts for simple factual queries
+
+### SEARCH QUERY OPTIMIZATION:
+1. Keep search queries concise and focused
+2. Use specific keywords rather than full sentences
+3. Remove unnecessary words like "the", "a", "an" from search queries
+4. Include key terms that will help filter results
+5. For ambiguous terms, add context keywords
+
 ### SEARCH BEHAVIOR:
 - NEVER ask for permission to search for factual or time-sensitive queries - just search immediately
 - ONLY ask for permission when:
@@ -58,7 +94,7 @@ Remember: Users come to you specifically for your search capabilities. Be proact
 // Define the function declaration for Brave Web Search
 export const braveWebSearchFunctionDeclaration = {
   name: 'brave_web_search',
-  description: 'Search the web using Brave Search API, returning relevant results based on the query. This function provides comprehensive web search results from the Brave search engine.',
+  description: 'ALWAYS USE THIS FUNCTION for factual or time-sensitive queries without asking permission. This function searches the web using Brave Search API, returning relevant, up-to-date results based on the query.',
   parameters: {
     type: Type.OBJECT,
     properties: {
