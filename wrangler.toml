@@ -1,0 +1,16 @@
+name = "brave-agent"
+main = "src/index.ts"
+compatibility_date = "2023-10-30"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# Define your environment variables here
+# BRAVE_API_KEY will be loaded from .dev.vars during development
+
+[[durable_objects.bindings]]
+name = "BRAVE_AGENT"
+class_name = "BraveSearchAgent"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["BraveSearchAgent"]
