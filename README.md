@@ -2,6 +2,14 @@
 
 A Cloudflare Workers AI agent that provides search capabilities using the Brave Search API. This agent can be interacted with via HTTP requests or WebSockets.
 
+## Current Implementation Status
+
+The agent is fully functional with robust parameter handling and type validation. Recent improvements include:
+
+- **Type Validation Fixes**: Implemented automatic conversion between string parameters and their expected types (numbers, booleans, arrays)
+- **Empty Value Handling**: Added special handling for empty values to prevent API validation errors
+- **Parameter Filtering**: Improved parameter processing to ensure only valid values are sent to the Brave Search API
+
 ## Features
 
 - Search the web using Brave Search API
@@ -121,6 +129,49 @@ The agent's behavior can be customized by modifying the following:
 - **Search Parameters**: Edit the `braveSearchSchema` in `src/index.ts` to add or modify search parameters.
 - **System Prompt**: Modify the `systemPrompt` in `src/index.ts` to change how the AI responds to queries.
 - **Default Preferences**: Update the `INITIAL_STATE` object in `src/index.ts` to change default search preferences.
+
+## Type Validation and Parameter Handling
+
+The agent includes robust type validation and parameter handling to ensure compatibility with various client implementations:
+
+### Zod Schema Transformations
+
+The `braveSearchSchema` includes transformations to handle different parameter types:
+
+```typescript
+// Example of string-to-number conversion
+count: z.union([z.string().transform(val => parseInt(val, 10)), z.number()])
+  .optional()
+  .describe("Number of search results to return (maximum 20, default 10).")
+
+// Example of string-to-boolean conversion
+text_decorations: z.union([
+  z.string().transform(val => val === 'true' ? true : val === 'false' ? false : Boolean(val)),
+  z.boolean()
+]).optional()
+```
+
+### Parameter Processing
+
+The execute function includes additional processing to ensure parameters are correctly formatted:
+
+```typescript
+// Skip empty strings for goggles_id as it must be a valid HTTPS URL
+if (key === 'goggles_id' && (value === undefined || value === '')) {
+  continue;
+}
+
+// Only include non-empty arrays
+if (Array.isArray(value)) {
+  if (value.length > 0) {
+    for (const item of value) {
+      url.searchParams.append(key, item.toString());
+    }
+  }
+}
+```
+
+These implementations ensure that the agent can handle parameters passed as strings (common in HTTP requests and JSON) while still validating them against the expected types.
 
 ## License
 

@@ -57,22 +57,53 @@ export class BraveSearchAgent extends Agent<{
   // Brave Search tool schema with detailed descriptions
   braveSearchSchema = z.object({
     query: z.string().describe("The user's search query term. Should be concise and focused on the key aspects of what you're looking for. Maximum of 400 characters and 50 words."),
-    count: z.number().optional().describe("Number of search results to return (maximum 20, default 10). Use a higher number for broad topics and a lower number for specific queries."),
-    offset: z.number().optional().describe("Results page offset (maximum 9, default 0). Use with count for pagination of results."),
+    count: z.union([z.string().transform(val => parseInt(val, 10)), z.number()])
+      .optional()
+      .describe("Number of search results to return (maximum 20, default 10). Use a higher number for broad topics and a lower number for specific queries."),
+    offset: z.union([z.string().transform(val => parseInt(val, 10)), z.number()])
+      .optional()
+      .describe("Results page offset (maximum 9, default 0). Use with count for pagination of results."),
     country: z.string().optional().describe("Two-letter country code to focus search results (e.g., 'US', 'GB', 'DE'). Use when searching for region-specific information."),
     search_lang: z.string().optional().describe("Two or more character language code for search results (e.g., 'en', 'fr', 'de'). Use when searching for content in a specific language."),
     safesearch: z.enum(["off", "moderate", "strict"]).optional().describe("Content filtering level: 'off' (no filtering), 'moderate' (filters explicit images/videos), or 'strict' (all adult content filtered)."),
     freshness: z.string().optional().describe("Filter by content age: 'pd' (past day), 'pw' (past week), 'pm' (past month), 'py' (past year), or date range like '2022-04-01to2022-07-30'."),
     
     // Additional parameters
-    text_decorations: z.boolean().optional().describe("Whether display strings (e.g. result snippets) should include decoration markers (e.g. highlighting characters). Default is true."),
-    spellcheck: z.boolean().optional().describe("Whether to spellcheck the provided query. If enabled, the modified query is always used for search. The modified query can be found in the 'altered' key in the response."),
+    text_decorations: z.union([
+      z.string().transform(val => val === 'true' ? true : val === 'false' ? false : Boolean(val)),
+      z.boolean()
+    ]).optional().describe("Whether display strings (e.g. result snippets) should include decoration markers (e.g. highlighting characters). Default is true."),
+    spellcheck: z.union([
+      z.string().transform(val => val === 'true' ? true : val === 'false' ? false : Boolean(val)),
+      z.boolean()
+    ]).optional().describe("Whether to spellcheck the provided query. If enabled, the modified query is always used for search. The modified query can be found in the 'altered' key in the response."),
     result_filter: z.string().optional().describe("Comma-delimited string of result types to include (e.g., 'discussions,videos,web'). Available values: discussions, faq, infobox, news, query, summarizer, videos, web, locations."),
     goggles_id: z.string().optional().describe("(Deprecated) Goggle ID for custom re-ranking of search results. Use the goggles parameter instead."),
-    goggles: z.array(z.string()).optional().describe("Custom re-ranking rules for search results. Can be a URL where the Goggle is hosted or the definition of the Goggle."),
-    units: z.enum(["metric", "imperial"]).optional().describe("Measurement units to use in results. If not provided, units are derived from the search country."),
-    extra_snippets: z.boolean().optional().describe("Allows retrieval of up to 5 additional, alternative excerpts from search result pages."),
-    summary: z.boolean().optional().describe("Enables summary key generation in web search results. Required for the summarizer to be enabled."),
+    goggles: z.union([
+      z.string().transform(val => {
+        try {
+          return JSON.parse(val);
+        } catch {
+          return val.split(',').filter(Boolean);
+        }
+      }),
+      z.array(z.string())
+    ]).optional().describe("Custom re-ranking rules for search results. Can be a URL where the Goggle is hosted or the definition of the Goggle."),
+    units: z.union([
+      z.string().transform(val => {
+        if (val === '') return undefined;
+        return val;
+      }),
+      z.enum(["metric", "imperial"])
+    ]).optional().describe("Measurement units to use in results. If not provided, units are derived from the search country."),
+    extra_snippets: z.union([
+      z.string().transform(val => val === 'true' ? true : val === 'false' ? false : Boolean(val)),
+      z.boolean()
+    ]).optional().describe("Allows retrieval of up to 5 additional, alternative excerpts from search result pages."),
+    summary: z.union([
+      z.string().transform(val => val === 'true' ? true : val === 'false' ? false : Boolean(val)),
+      z.boolean()
+    ]).optional().describe("Enables summary key generation in web search results. Required for the summarizer to be enabled."),
     ui_lang: z.string().optional().describe("User interface language preferred in response, usually in format '<language_code>-<country_code>' (e.g., 'en-US')."),
   });
 
@@ -310,112 +341,161 @@ export class BraveSearchAgent extends Agent<{
 
   // Process search queries
   async search(query: string): Promise<string> {
-    try {
-      // Update state with the new search
-      const state = this.state ?? INITIAL_STATE;
-      const newState: BraveSearchState = {
-        ...state,
-        recentSearches: [
-          { query, timestamp: Date.now() },
-          ...(state.recentSearches || [])
-        ].slice(0, MAX_RECENT_SEARCHES),
-        conversationHistory: [
-          { role: "user" as const, content: query, timestamp: Date.now() },
-          ...(state.conversationHistory || [])
-        ].slice(0, MAX_CONVERSATION_HISTORY)
-      };
-      this.setState(newState);
-      
-      // Process the search query with AI
-      const workersAI = createWorkersAI({ binding: this.env.AI });
-      const model = workersAI("@cf/meta/llama-3.1-8b-instruct");
-      
-      const { text } = await generateText({
-        model,
-        system: this.systemPrompt,
-        prompt: query,
-        tools: {
-          braveSearch: tool({
-            description: "Search the web using Brave Search to find relevant information for the user's query.",
-            parameters: this.braveSearchSchema,
-            execute: async ({ query, ...rest }: { query: string; [key: string]: any }) => {
-              // Use preferences from state as defaults
-              const preferences = this.state?.preferences ?? INITIAL_STATE.preferences;
-              
-              // Build the URL with parameters
-              const url = new URL('https://api.search.brave.com/res/v1/web/search');
-              url.searchParams.append('q', query);
-              
-              // Add preferences as defaults if not explicitly provided
-              if (!rest.count && preferences.count) {
-                url.searchParams.append('count', preferences.count.toString());
+  try {
+    console.log("Starting search process for:", query);
+    
+    // Update state with the new search
+    const state = this.state ?? INITIAL_STATE;
+    this.setState({
+      ...state,
+      recentSearches: [
+        { query, timestamp: Date.now() },
+        ...(state.recentSearches || [])
+      ].slice(0, MAX_RECENT_SEARCHES),
+      conversationHistory: [
+        { role: "user" as const, content: query, timestamp: Date.now() },
+        ...(state.conversationHistory || [])
+      ].slice(0, MAX_CONVERSATION_HISTORY)
+    });
+    
+    // Process the search query with AI
+    const workersAI = createWorkersAI({ binding: this.env.AI });
+    const model = workersAI("@cf/meta/llama-3.1-8b-instruct");
+    
+    console.log("Generating text with AI...");
+    const { text } = await generateText({
+      model,
+      system: this.systemPrompt,
+      prompt: query,
+      tools: {
+        braveSearch: tool({
+          description: "Search the web using Brave Search to find relevant information for the user's query.",
+          parameters: this.braveSearchSchema,
+          execute: async ({ query, ...rest }: { query: string; [key: string]: any }) => {
+            console.log("Executing Brave search for:", query);
+            
+            // Convert string parameters to proper types
+            const parsedParams: { [key: string]: any } = { ...rest };
+            
+            // Convert string numbers to actual numbers
+            if (typeof parsedParams.count === 'string') parsedParams.count = parseInt(parsedParams.count, 10);
+            if (typeof parsedParams.offset === 'string') parsedParams.offset = parseInt(parsedParams.offset, 10);
+            
+            // Convert string booleans to actual booleans
+            const booleanParams = ['text_decorations', 'spellcheck', 'extra_snippets', 'summary'];
+            for (const param of booleanParams) {
+              if (parsedParams[param] === 'true') parsedParams[param] = true;
+              else if (parsedParams[param] === 'false') parsedParams[param] = false;
+            }
+            
+            // Use preferences from state as defaults
+            const preferences = this.state?.preferences ?? INITIAL_STATE.preferences;
+            
+            // Build the URL with parameters
+            const url = new URL('https://api.search.brave.com/res/v1/web/search');
+            url.searchParams.append('q', query);
+            
+            // Add preferences as defaults if not explicitly provided
+            if (!parsedParams.count && preferences.count) {
+              url.searchParams.append('count', preferences.count.toString());
+            }
+            if (!parsedParams.safesearch && preferences.safesearch) {
+              url.searchParams.append('safesearch', preferences.safesearch);
+            }
+            if (!parsedParams.country && preferences.country) {
+              url.searchParams.append('country', preferences.country);
+            }
+            if (!parsedParams.text_decorations && preferences.text_decorations !== undefined) {
+              url.searchParams.append('text_decorations', preferences.text_decorations ? '1' : '0');
+            }
+            if (!parsedParams.spellcheck && preferences.spellcheck !== undefined) {
+              url.searchParams.append('spellcheck', preferences.spellcheck ? '1' : '0');
+            }
+            if (!parsedParams.extra_snippets && preferences.extra_snippets !== undefined) {
+              url.searchParams.append('extra_snippets', preferences.extra_snippets ? '1' : '0');
+            }
+            if (!parsedParams.summary && preferences.summary !== undefined) {
+              url.searchParams.append('summary', preferences.summary ? '1' : '0');
+            }
+            if (!parsedParams.units && preferences.units) {
+              url.searchParams.append('units', preferences.units);
+            }
+            if (!parsedParams.result_filter && preferences.result_filter) {
+              url.searchParams.append('result_filter', preferences.result_filter);
+            }
+            
+            // Handle any additional parameters
+            for (const [key, value] of Object.entries(parsedParams)) {
+              // Skip empty strings for goggles_id as it must be a valid HTTPS URL
+              if (key === 'goggles_id' && (value === undefined || value === '')) {
+                continue;
               }
-              if (!rest.safesearch && preferences.safesearch) {
-                url.searchParams.append('safesearch', preferences.safesearch);
-              }
-              if (!rest.country && preferences.country) {
-                url.searchParams.append('country', preferences.country);
-              }
               
-              // Handle boolean parameters properly
-              for (const [key, value] of Object.entries(rest)) {
-                if (value !== undefined) {
-                  // Convert boolean values to 0/1 for API parameters
-                  if (typeof value === 'boolean') {
-                    url.searchParams.append(key, value ? '1' : '0');
-                  } 
-                  // Convert array values for parameters like goggles
-                  else if (Array.isArray(value)) {
+              if (value !== undefined) {
+                // Convert boolean values to 0/1 for API parameters
+                if (typeof value === 'boolean') {
+                  url.searchParams.append(key, value ? '1' : '0');
+                } 
+                // Convert array values for parameters like goggles
+                else if (Array.isArray(value)) {
+                  if (value.length > 0) {
                     for (const item of value) {
                       url.searchParams.append(key, item.toString());
                     }
                   }
-                  // Handle all other types
-                  else {
-                    url.searchParams.append(key, value.toString());
-                  }
+                }
+                // Handle all other types
+                else if (value !== '') {  // Skip empty strings
+                  url.searchParams.append(key, value.toString());
                 }
               }
-              
-              // Make the API request
-              const response = await fetch(url.toString(), {
-                headers: {
-                  'Accept': 'application/json',
-                  'Accept-Encoding': 'gzip',
-                  'X-Subscription-Token': this.env.BRAVE_SEARCH_API_KEY
-                }
-              });
-              
-              if (!response.ok) {
-                throw new Error(`Brave Search API returned ${response.status}: ${await response.text()}`);
-              }
-              
-              const data = await response.json();
-              
-              // Process the response to make it more usable for the AI
-              return this.processSearchResults(data);
             }
-          })
-        },
-        maxSteps: 3 // Allow multiple search steps if needed
-      });
-      
-      // Update conversation history with the response
-      const updatedState = this.state ?? INITIAL_STATE;
-      this.setState({
-        ...updatedState,
-        conversationHistory: [
-          { role: "assistant" as const, content: text, timestamp: Date.now() },
-          ...(updatedState.conversationHistory || [])
-        ].slice(0, MAX_CONVERSATION_HISTORY)
-      });
-      
-      return text;
-    } catch (error) {
-      console.error("Error processing search:", error);
-      return `Sorry, I encountered an error while searching: ${error instanceof Error ? error.message : 'Unknown error'}`;
-    }
+            
+            console.log("Brave Search URL:", url.toString());
+            
+            // Make the API request
+            const response = await fetch(url.toString(), {
+              headers: {
+                'Accept': 'application/json',
+                'Accept-Encoding': 'gzip',
+                'X-Subscription-Token': this.env.BRAVE_SEARCH_API_KEY
+              }
+            });
+            
+            if (!response.ok) {
+              throw new Error(`Brave Search API returned ${response.status}: ${await response.text()}`);
+            }
+            
+            const data = await response.json();
+            console.log("Received Brave search results");
+            
+            // Process the response to make it more usable for the AI
+            return this.processSearchResults(data);
+          }
+        })
+      },
+      maxSteps: 5, // Increase max steps to allow for more interaction with search tool
+      temperature: 0.7 // Add some variety to responses
+    });
+    
+    console.log("AI generated response:", text.substring(0, 100) + "...");
+    
+    // Update conversation history with the response
+    const updatedState = this.state ?? INITIAL_STATE;
+    this.setState({
+      ...updatedState,
+      conversationHistory: [
+        { role: "assistant" as const, content: text, timestamp: Date.now() },
+        ...(updatedState.conversationHistory || [])
+      ].slice(0, MAX_CONVERSATION_HISTORY)
+    });
+    
+    return text;
+  } catch (error) {
+    console.error("Error processing search:", error);
+    return `Sorry, I encountered an error while searching: ${error instanceof Error ? error.message : 'Unknown error'}`;
   }
+}
   
   // Process and format the search results to make them more usable for the AI
   private processSearchResults(data: any) {
@@ -546,90 +626,11 @@ export class BraveSearchAgent extends Agent<{
   }
 }
 
-// Create a simple implementation of the search functionality
-// This bypasses the agent framework for direct testing
-async function handleSearchRequest(request: Request, env: any): Promise<Response> {
-  try {
-    // Parse the request body
-    const body = await request.json() as any;
-    const { query } = body;
-    
-    if (!query) {
-      return new Response(JSON.stringify({ error: "Query is required" }), { 
-        status: 400,
-        headers: { "Content-Type": "application/json" }
-      });
-    }
-    
-    // Build the URL with parameters
-    const url = new URL('https://api.search.brave.com/res/v1/web/search');
-    url.searchParams.append('q', query);
-    url.searchParams.append('count', '5'); // Limit to 5 results for testing
-    
-    // Make the API request
-    const response = await fetch(url.toString(), {
-      headers: {
-        'Accept': 'application/json',
-        'Accept-Encoding': 'gzip',
-        'X-Subscription-Token': env.BRAVE_SEARCH_API_KEY
-      }
-    });
-    
-    if (!response.ok) {
-      throw new Error(`Brave Search API returned ${response.status}: ${await response.text()}`);
-    }
-    
-    const data = await response.json() as any;
-    
-    // Return a simplified response
-    return new Response(JSON.stringify({
-      query,
-      results: data.web?.results || [],
-      total: data.web?.results?.length || 0
-    }), {
-      headers: { "Content-Type": "application/json" }
-    });
-  } catch (error) {
-    console.error("Error processing search:", error);
-    return new Response(JSON.stringify({ error: "Error processing search" }), { 
-      status: 500,
-      headers: { "Content-Type": "application/json" }
-    });
-  }
-}
-
 export default {
-  async fetch(request: Request, env: any, ctx: ExecutionContext): Promise<Response> {
-    try {
-      console.log("Request URL:", request.url);
-      console.log("Available bindings:", Object.keys(env));
-      
-      const url = new URL(request.url);
-      
-      // Handle search requests directly without using the agent framework
-      if (url.pathname.includes('/agents/brave-search/default/search')) {
-        console.log("Handling search request directly");
-        return handleSearchRequest(request, env);
-      }
-      
-      // For other requests, try the standard agent routing
-      try {
-        const response = await routeAgentRequest(request, env, {
-          cors: true
-        });
-        
-        if (response) {
-          return response;
-        }
-      } catch (routingError) {
-        console.error("Standard routing failed:", routingError);
-      }
-      
-      // Return a 404 if no route matched
-      return new Response("No agent route matched", { status: 404 });
-    } catch (error) {
-      console.error("Error handling request:", error);
-      return new Response(`Error handling request: ${error instanceof Error ? error.message : 'Unknown error'}`, { status: 500 });
-    }
+  async fetch(request: Request, env: any) {
+    return (
+      (await routeAgentRequest(request, env, { cors: true })) ||
+      new Response("Not found", { status: 404 })
+    );
   },
 };
