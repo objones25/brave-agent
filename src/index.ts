@@ -1,6 +1,6 @@
-import { Agent, type AgentContext, type Connection, type WSMessage, unstable_callable } from "agents";
+import { Agent, type AgentContext, type Connection, type WSMessage} from "agents";
 import { generateText, tool } from "ai";
-import { createWorkersAI } from "workers-ai-provider";
+import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { routeAgentRequest } from "agents";
 import { z } from "zod";
 
@@ -48,8 +48,8 @@ const MAX_RECENT_SEARCHES = 10;
 const MAX_CONVERSATION_HISTORY = 20;
 
 export class BraveSearchAgent extends Agent<{
-  AI: any;
   BRAVE_SEARCH_API_KEY: string;
+  GEMINI_API_KEY: string;
 }, BraveSearchState> {
   // Initialize state
   initialState: BraveSearchState = INITIAL_STATE;
@@ -145,7 +145,7 @@ export class BraveSearchAgent extends Agent<{
     Remember: Your goal is to be helpful, accurate, and respectful of privacy. Always strive to provide the most relevant information to answer the user's question.
   `;
 
-  constructor(ctx: AgentContext, env: { AI: any; BRAVE_SEARCH_API_KEY: string }) {
+  constructor(ctx: AgentContext, env: { BRAVE_SEARCH_API_KEY: string; GEMINI_API_KEY: string }) {
     super(ctx, env);
   }
 
@@ -358,9 +358,9 @@ export class BraveSearchAgent extends Agent<{
       ].slice(0, MAX_CONVERSATION_HISTORY)
     });
     
-    // Process the search query with AI
-    const workersAI = createWorkersAI({ binding: this.env.AI });
-    const model = workersAI("@cf/meta/llama-3.1-8b-instruct");
+    // Process the search query with Google's Gemini Pro model
+    const googleAI = createGoogleGenerativeAI({ apiKey: this.env.GEMINI_API_KEY });
+    const model = googleAI("gemini-1.5-pro");
     
     console.log("Generating text with AI...");
     const { text } = await generateText({
