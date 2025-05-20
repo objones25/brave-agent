@@ -1,383 +1,635 @@
-import { Hono } from 'hono';
-import { cors } from 'hono/cors';
-import { BraveSearchAgent } from './brave-search-agent';
+import { Agent, type AgentContext, type Connection, type WSMessage, unstable_callable } from "agents";
+import { generateText, tool } from "ai";
+import { createWorkersAI } from "workers-ai-provider";
+import { routeAgentRequest } from "agents";
+import { z } from "zod";
 
-// Export the BraveSearchAgent class for Durable Object
-export { BraveSearchAgent };
-
-// Define the environment interface
-export interface Env {
-  // Durable Object binding
-  BRAVE_AGENT: DurableObjectNamespace;
-  
-  // API keys
-  BRAVE_API_KEY: string;
-  GEMINI_API_KEY: string;
+// Define the state interface for the agent
+interface BraveSearchState {
+  recentSearches: Array<{
+    query: string;
+    timestamp: number;
+  }>;
+  conversationHistory: Array<{
+    role: "user" | "assistant";
+    content: string;
+    timestamp: number;
+  }>;
+  preferences: {
+    safesearch: "off" | "moderate" | "strict";
+    count: number;
+    country: string;
+    text_decorations?: boolean;
+    spellcheck?: boolean;
+    units?: "metric" | "imperial";
+    extra_snippets?: boolean;
+    summary?: boolean;
+    result_filter?: string;
+  };
 }
 
-// HTML content for the client page
-const clientHtml = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Brave Search Agent Client</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      max-width: 800px;
-      margin: 0 auto;
-      padding: 20px;
-      line-height: 1.6;
-    }
-    
-    h1 {
-      color: #FB542B; /* Brave orange color */
-      text-align: center;
-    }
-    
-    .chat-container {
-      border: 1px solid #ddd;
-      border-radius: 8px;
-      padding: 20px;
-      margin-bottom: 20px;
-      height: 400px;
-      overflow-y: auto;
-    }
-    
-    .message {
-      margin-bottom: 15px;
-      padding: 10px;
-      border-radius: 8px;
-    }
-    
-    .user-message {
-      background-color: #e6f7ff;
-      margin-left: 20%;
-      margin-right: 0;
-    }
-    
-    .agent-message {
-      background-color: #f0f0f0;
-      margin-right: 20%;
-      margin-left: 0;
-    }
-    
-    .search-results {
-      margin-top: 10px;
-      padding: 10px;
-      background-color: #f9f9f9;
-      border-radius: 5px;
-      font-size: 0.9em;
-    }
-    
-    .search-result {
-      margin-bottom: 10px;
-      padding-bottom: 10px;
-      border-bottom: 1px solid #eee;
-    }
-    
-    .search-result:last-child {
-      border-bottom: none;
-    }
-    
-    .search-result h3 {
-      margin: 0 0 5px 0;
-      font-size: 1em;
-    }
-    
-    .search-result a {
-      color: #1a0dab;
-      text-decoration: none;
-    }
-    
-    .search-result a:hover {
-      text-decoration: underline;
-    }
-    
-    .search-result p {
-      margin: 5px 0;
-      font-size: 0.9em;
-      color: #333;
-    }
-    
-    .input-container {
-      display: flex;
-      gap: 10px;
-    }
-    
-    #message-input {
-      flex-grow: 1;
-      padding: 10px;
-      border: 1px solid #ddd;
-      border-radius: 4px;
-    }
-    
-    button {
-      background-color: #FB542B;
-      color: white;
-      border: none;
-      padding: 10px 15px;
-      border-radius: 4px;
-      cursor: pointer;
-    }
-    
-    button:hover {
-      background-color: #e64a24;
-    }
-    
-    .loading {
-      text-align: center;
-      margin: 20px 0;
-      font-style: italic;
-      color: #666;
-    }
-    
-    .favicon {
-      width: 16px;
-      height: 16px;
-      margin-right: 5px;
-      vertical-align: middle;
-    }
-  </style>
-</head>
-<body>
-  <h1>Brave Search Agent</h1>
-  
-  <div class="chat-container" id="chat-container"></div>
-  
-  <div class="input-container">
-    <input type="text" id="message-input" placeholder="Ask something..." />
-    <button id="send-button">Send</button>
-  </div>
-  
-  <script>
-    // Configuration
-    const AGENT_URL = 'http://localhost:8787/agents/brave-search-agent';
-    let conversationId = null;
-    
-    // DOM elements
-    const chatContainer = document.getElementById('chat-container');
-    const messageInput = document.getElementById('message-input');
-    const sendButton = document.getElementById('send-button');
-    
-    // Initialize the conversation
-    async function initConversation() {
-      // Generate a random conversation ID if not already set
-      if (!conversationId) {
-        conversationId = Math.random().toString(36).substring(2, 15);
-      }
-    }
-    
-    // Add a message to the chat
-    function addMessage(content, isUser = false, searchResults = null) {
-      const messageDiv = document.createElement('div');
-      messageDiv.className = \`message \${isUser ? 'user-message' : 'agent-message'}\`;
-      messageDiv.textContent = content;
-      
-      // If there are search results, add them
-      if (searchResults && searchResults.results && searchResults.results.length > 0) {
-        const resultsDiv = document.createElement('div');
-        resultsDiv.className = 'search-results';
-        
-        const resultsTitle = document.createElement('h3');
-        resultsTitle.textContent = 'Search Results:';
-        resultsDiv.appendChild(resultsTitle);
-        
-        searchResults.results.forEach(result => {
-          const resultDiv = document.createElement('div');
-          resultDiv.className = 'search-result';
-          
-          const titleLink = document.createElement('a');
-          titleLink.href = result.url;
-          titleLink.target = '_blank';
-          titleLink.textContent = result.title;
-          
-          const titleH3 = document.createElement('h3');
-          
-          // Add favicon if available
-          if (result.favicon) {
-            const favicon = document.createElement('img');
-            favicon.src = result.favicon;
-            favicon.className = 'favicon';
-            favicon.onerror = () => { favicon.style.display = 'none'; };
-            titleH3.appendChild(favicon);
-          }
-          
-          titleH3.appendChild(titleLink);
-          resultDiv.appendChild(titleH3);
-          
-          const description = document.createElement('p');
-          description.textContent = result.description;
-          resultDiv.appendChild(description);
-          
-          resultsDiv.appendChild(resultDiv);
-        });
-        
-        messageDiv.appendChild(resultsDiv);
-      }
-      
-      chatContainer.appendChild(messageDiv);
-      chatContainer.scrollTop = chatContainer.scrollHeight;
-    }
-    
-    // Send a message to the agent
-    async function sendMessage(message) {
-      try {
-        // Add the user message to the chat
-        addMessage(message, true);
-        
-        // Show loading indicator
-        const loadingDiv = document.createElement('div');
-        loadingDiv.className = 'loading';
-        loadingDiv.textContent = 'Agent is thinking...';
-        chatContainer.appendChild(loadingDiv);
-        
-        // Make sure we have a conversation ID
-        await initConversation();
-        
-        // Call the agent's chat method
-        const response = await fetch(\`\${AGENT_URL}/chat\`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            conversationId,
-            message
-          })
-        });
-        
-        if (!response.ok) {
-          throw new Error(\`Error: \${response.status} \${response.statusText}\`);
-        }
-        
-        const data = await response.json();
-        
-        // Remove loading indicator
-        chatContainer.removeChild(loadingDiv);
-        
-        // Get the search results if available
-        let searchResults = null;
-        if (conversationId) {
-          const conversationResponse = await fetch(\`\${AGENT_URL}/getConversation\`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              conversationId
-            })
-          });
-          
-          if (conversationResponse.ok) {
-            const conversationData = await conversationResponse.json();
-            searchResults = conversationData.searchResults;
-          }
-        }
-        
-        // Add the agent's response to the chat
-        addMessage(data.response, false, searchResults);
-      } catch (error) {
-        console.error('Error sending message:', error);
-        
-        // Remove loading indicator if it exists
-        const loadingDiv = document.querySelector('.loading');
-        if (loadingDiv) {
-          chatContainer.removeChild(loadingDiv);
-        }
-        
-        // Add error message
-        addMessage(\`Error: \${error.message}\`, false);
-      }
-    }
-    
-    // Event listeners
-    sendButton.addEventListener('click', () => {
-      const message = messageInput.value.trim();
-      if (message) {
-        sendMessage(message);
-        messageInput.value = '';
-      }
-    });
-    
-    messageInput.addEventListener('keypress', (event) => {
-      if (event.key === 'Enter') {
-        const message = messageInput.value.trim();
-        if (message) {
-          sendMessage(message);
-          messageInput.value = '';
-        }
-      }
-    });
-    
-    // Initialize the conversation when the page loads
-    window.addEventListener('load', initConversation);
-    
-    // Add welcome message
-    addMessage('Hello! I\\'m the Brave Search Agent. I\\'ll automatically search for current information like weather, stock prices, news, and facts. Just ask me what you want to know!');
-  </script>
-</body>
-</html>`;
-
-// Create a new Hono app
-const app = new Hono<{ Bindings: Env }>();
-
-// Add CORS middleware
-app.use('*', cors());
-
-// Serve the client HTML at multiple paths with the same handler
-const serveClientHtml = (c: any) => {
-  return new Response(clientHtml, {
-    headers: { 'Content-Type': 'text/html' }
-  });
+// Initial state with default values
+const INITIAL_STATE: BraveSearchState = {
+  recentSearches: [],
+  conversationHistory: [],
+  preferences: {
+    safesearch: "moderate",
+    count: 10,
+    country: "US",
+    text_decorations: true,
+    spellcheck: true,
+    units: "metric",
+    extra_snippets: true,
+    summary: true
+  }
 };
 
-app.get('/', serveClientHtml);
-app.get('/index.html', serveClientHtml);
-app.get('/brave-search-client.html', serveClientHtml);
+const MAX_RECENT_SEARCHES = 10;
+const MAX_CONVERSATION_HISTORY = 20;
 
-// Route agent requests
-app.all('/agents/brave-search-agent/*', async (c) => {
-  try {
-    const env = c.env;
-    const request = c.req.raw;
+export class BraveSearchAgent extends Agent<{
+  AI: any;
+  BRAVE_SEARCH_API_KEY: string;
+}, BraveSearchState> {
+  // Initialize state
+  initialState: BraveSearchState = INITIAL_STATE;
+
+  // Brave Search tool schema with detailed descriptions
+  braveSearchSchema = z.object({
+    query: z.string().describe("The user's search query term. Should be concise and focused on the key aspects of what you're looking for. Maximum of 400 characters and 50 words."),
+    count: z.number().optional().describe("Number of search results to return (maximum 20, default 10). Use a higher number for broad topics and a lower number for specific queries."),
+    offset: z.number().optional().describe("Results page offset (maximum 9, default 0). Use with count for pagination of results."),
+    country: z.string().optional().describe("Two-letter country code to focus search results (e.g., 'US', 'GB', 'DE'). Use when searching for region-specific information."),
+    search_lang: z.string().optional().describe("Two or more character language code for search results (e.g., 'en', 'fr', 'de'). Use when searching for content in a specific language."),
+    safesearch: z.enum(["off", "moderate", "strict"]).optional().describe("Content filtering level: 'off' (no filtering), 'moderate' (filters explicit images/videos), or 'strict' (all adult content filtered)."),
+    freshness: z.string().optional().describe("Filter by content age: 'pd' (past day), 'pw' (past week), 'pm' (past month), 'py' (past year), or date range like '2022-04-01to2022-07-30'."),
+    
+    // Additional parameters
+    text_decorations: z.boolean().optional().describe("Whether display strings (e.g. result snippets) should include decoration markers (e.g. highlighting characters). Default is true."),
+    spellcheck: z.boolean().optional().describe("Whether to spellcheck the provided query. If enabled, the modified query is always used for search. The modified query can be found in the 'altered' key in the response."),
+    result_filter: z.string().optional().describe("Comma-delimited string of result types to include (e.g., 'discussions,videos,web'). Available values: discussions, faq, infobox, news, query, summarizer, videos, web, locations."),
+    goggles_id: z.string().optional().describe("(Deprecated) Goggle ID for custom re-ranking of search results. Use the goggles parameter instead."),
+    goggles: z.array(z.string()).optional().describe("Custom re-ranking rules for search results. Can be a URL where the Goggle is hosted or the definition of the Goggle."),
+    units: z.enum(["metric", "imperial"]).optional().describe("Measurement units to use in results. If not provided, units are derived from the search country."),
+    extra_snippets: z.boolean().optional().describe("Allows retrieval of up to 5 additional, alternative excerpts from search result pages."),
+    summary: z.boolean().optional().describe("Enables summary key generation in web search results. Required for the summarizer to be enabled."),
+    ui_lang: z.string().optional().describe("User interface language preferred in response, usually in format '<language_code>-<country_code>' (e.g., 'en-US')."),
+  });
+
+  // System prompt with detailed instructions
+  systemPrompt = `
+    You are BraveSearchAgent, an advanced search assistant powered by Brave Search.
+    
+    Your core purpose is to help users find accurate, up-to-date information while respecting their privacy. You have access to Brave Search, which provides high-quality search results without tracking users.
+    
+    SEARCH CAPABILITIES:
+    - You can search the web using the braveSearch tool.
+    - You can customize searches with parameters like result count, language, country, and content filtering.
+    - You can search for various content types including web pages, news, videos, and more.
+    
+    GUIDELINES FOR SEARCHING:
+    1. For factual questions, current events, or information that might be on the web, use the search tool.
+    2. Formulate concise search queries focused on the essential aspects of the user's question.
+    3. Use search parameters strategically:
+       - Increase 'count' for broad topics where more results might be helpful.
+       - Use 'freshness' for time-sensitive information.
+       - Use 'result_filter' to focus on specific types of content when appropriate.
+    4. For complex questions, perform multiple searches with different queries to gather comprehensive information.
+    5. If initial results aren't helpful, refine your search with alternative terms or parameters.
+    
+    RESPONSE GUIDELINES:
+    1. Always synthesize search results into a coherent, direct answer - don't just list results.
+    2. Cite sources by mentioning the website names when providing information from search results.
+    3. Be factual and objective in presenting information.
+    4. Present nuanced views when appropriate, especially for topics with multiple perspectives.
+    5. If search results are inconclusive or contradictory, acknowledge this honestly.
+    6. Format your response for readability, using bullet points or sections for complex information.
+    
+    EXAMPLES OF GOOD SEARCH QUERIES:
+    - "latest climate change reports" (for recent information on climate change)
+    - "how to grow tomatoes container garden" (for specific how-to information)
+    - "python dictionary syntax examples" (for programming help)
+    - "toronto restaurants italian downtown" (for local recommendations)
+    
+    Remember: Your goal is to be helpful, accurate, and respectful of privacy. Always strive to provide the most relevant information to answer the user's question.
+  `;
+
+  constructor(ctx: AgentContext, env: { AI: any; BRAVE_SEARCH_API_KEY: string }) {
+    super(ctx, env);
+  }
+
+  // Handle WebSocket messages for real-time interaction
+  override async onMessage(connection: Connection, message: WSMessage): Promise<void> {
+    try {
+      if (typeof message !== "string") {
+        return await super.onMessage(connection, message);
+      }
+
+      const data = JSON.parse(message) as any;
+      
+      // Handle search requests via WebSocket
+      if (data.type === "search_request") {
+        const { query, preferences } = data;
+        
+        // Update preferences if provided
+        if (preferences) {
+          const state = this.state ?? INITIAL_STATE;
+          this.setState({
+            ...state,
+            preferences: {
+              ...state.preferences,
+              ...preferences
+            }
+          });
+        }
+        
+        // Process the search
+        const response = await this.search(query);
+        
+        // Send the response back through the WebSocket
+        connection.send(JSON.stringify({
+          type: "search_response",
+          query,
+          response
+        }));
+        
+        return;
+      }
+      
+      // Handle preference updates
+      if (data.type === "update_preferences") {
+        const state = this.state ?? INITIAL_STATE;
+        this.setState({
+          ...state,
+          preferences: {
+            ...state.preferences,
+            ...data.preferences
+          }
+        });
+        
+        connection.send(JSON.stringify({
+          type: "preferences_updated",
+          preferences: this.state?.preferences ?? INITIAL_STATE.preferences
+        }));
+        
+        return;
+      }
+      
+      // Handle history clearing
+      if (data.type === "clear_history") {
+        const state = this.state ?? INITIAL_STATE;
+        this.setState({
+          ...state,
+          recentSearches: [],
+          conversationHistory: []
+        });
+        
+        connection.send(JSON.stringify({
+          type: "history_cleared"
+        }));
+        
+        return;
+      }
+      
+      // Pass through to parent handler for other messages
+      await super.onMessage(connection, message);
+    } catch (error) {
+      console.error("Error handling WebSocket message:", error);
+      connection.send(JSON.stringify({
+        type: "error",
+        message: "Error processing your request"
+      }));
+    }
+  }
+
+  // Handle HTTP requests
+  override async onRequest(request: Request): Promise<Response> {
     const url = new URL(request.url);
     
-    // Extract the conversation ID from the request
-    let conversationId = '';
-    
-    if (request.method === 'POST') {
+    // Search endpoint
+    if (url.pathname.endsWith("/search") && request.method === "POST") {
       try {
-        const body = await request.clone().json() as any;
-        if (body && typeof body.conversationId === 'string') {
-          conversationId = body.conversationId;
+        const body = await request.json() as any;
+        const { query, preferences } = body;
+        
+        if (!query) {
+          return new Response(JSON.stringify({ error: "Query is required" }), { 
+            status: 400,
+            headers: { "Content-Type": "application/json" }
+          });
         }
-      } catch (e) {
-        // Ignore JSON parsing errors
+        
+        // Update preferences if provided
+        if (preferences) {
+          const state = this.state ?? INITIAL_STATE;
+          this.setState({
+            ...state,
+            preferences: {
+              ...state.preferences,
+              ...preferences
+            }
+          });
+        }
+        
+        // Process the search
+        const response = await this.search(query);
+        
+        return new Response(JSON.stringify({ query, response }), {
+          headers: { "Content-Type": "application/json" }
+        });
+      } catch (error) {
+        console.error("Error processing search:", error);
+        return new Response(JSON.stringify({ error: "Error processing search" }), { 
+          status: 500,
+          headers: { "Content-Type": "application/json" }
+        });
       }
     }
     
-    // Create a unique ID for this agent instance
-    // Use the conversation ID as the name to ensure the same instance is used for the same conversation
-    const id = env.BRAVE_AGENT.idFromName(conversationId || url.pathname);
-    const stub = env.BRAVE_AGENT.get(id);
+    // State endpoint
+    if (url.pathname.endsWith("/state") && request.method === "GET") {
+      return new Response(JSON.stringify(this.state ?? INITIAL_STATE), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
     
-    // Forward the request to the Durable Object
-    return await stub.fetch(request);
-  } catch (error) {
-    console.error('Error routing agent request:', error);
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    return new Response(`Error: ${errorMessage}`, { status: 500 });
+    // Update preferences endpoint
+    if (url.pathname.endsWith("/preferences") && request.method === "POST") {
+      try {
+        const body = await request.json() as any;
+        const state = this.state ?? INITIAL_STATE;
+        
+        this.setState({
+          ...state,
+          preferences: {
+            ...state.preferences,
+            ...body
+          }
+        });
+        
+        return new Response(JSON.stringify({ 
+          success: true, 
+          preferences: this.state?.preferences ?? INITIAL_STATE.preferences 
+        }), {
+          headers: { "Content-Type": "application/json" }
+        });
+      } catch (error) {
+        console.error("Error updating preferences:", error);
+        return new Response(JSON.stringify({ error: "Error updating preferences" }), { 
+          status: 500,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+    }
+    
+    // Clear history endpoint
+    if (url.pathname.endsWith("/clear-history") && request.method === "POST") {
+      try {
+        const state = this.state ?? INITIAL_STATE;
+        this.setState({
+          ...state,
+          recentSearches: [],
+          conversationHistory: []
+        });
+        
+        return new Response(JSON.stringify({ success: true }), {
+          headers: { "Content-Type": "application/json" }
+        });
+      } catch (error) {
+        console.error("Error clearing history:", error);
+        return new Response(JSON.stringify({ error: "Error clearing history" }), { 
+          status: 500,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+    }
+    
+    // Default to superclass handling for other requests
+    return super.onRequest(request);
   }
-});
 
-// Handle all other routes with a 404
-app.all('*', (c) => {
-  return new Response('Not found', { status: 404 });
-});
+  // Process search queries
+  async search(query: string): Promise<string> {
+    try {
+      // Update state with the new search
+      const state = this.state ?? INITIAL_STATE;
+      const newState: BraveSearchState = {
+        ...state,
+        recentSearches: [
+          { query, timestamp: Date.now() },
+          ...(state.recentSearches || [])
+        ].slice(0, MAX_RECENT_SEARCHES),
+        conversationHistory: [
+          { role: "user" as const, content: query, timestamp: Date.now() },
+          ...(state.conversationHistory || [])
+        ].slice(0, MAX_CONVERSATION_HISTORY)
+      };
+      this.setState(newState);
+      
+      // Process the search query with AI
+      const workersAI = createWorkersAI({ binding: this.env.AI });
+      const model = workersAI("@cf/meta/llama-3.1-8b-instruct");
+      
+      const { text } = await generateText({
+        model,
+        system: this.systemPrompt,
+        prompt: query,
+        tools: {
+          braveSearch: tool({
+            description: "Search the web using Brave Search to find relevant information for the user's query.",
+            parameters: this.braveSearchSchema,
+            execute: async ({ query, ...rest }: { query: string; [key: string]: any }) => {
+              // Use preferences from state as defaults
+              const preferences = this.state?.preferences ?? INITIAL_STATE.preferences;
+              
+              // Build the URL with parameters
+              const url = new URL('https://api.search.brave.com/res/v1/web/search');
+              url.searchParams.append('q', query);
+              
+              // Add preferences as defaults if not explicitly provided
+              if (!rest.count && preferences.count) {
+                url.searchParams.append('count', preferences.count.toString());
+              }
+              if (!rest.safesearch && preferences.safesearch) {
+                url.searchParams.append('safesearch', preferences.safesearch);
+              }
+              if (!rest.country && preferences.country) {
+                url.searchParams.append('country', preferences.country);
+              }
+              
+              // Handle boolean parameters properly
+              for (const [key, value] of Object.entries(rest)) {
+                if (value !== undefined) {
+                  // Convert boolean values to 0/1 for API parameters
+                  if (typeof value === 'boolean') {
+                    url.searchParams.append(key, value ? '1' : '0');
+                  } 
+                  // Convert array values for parameters like goggles
+                  else if (Array.isArray(value)) {
+                    for (const item of value) {
+                      url.searchParams.append(key, item.toString());
+                    }
+                  }
+                  // Handle all other types
+                  else {
+                    url.searchParams.append(key, value.toString());
+                  }
+                }
+              }
+              
+              // Make the API request
+              const response = await fetch(url.toString(), {
+                headers: {
+                  'Accept': 'application/json',
+                  'Accept-Encoding': 'gzip',
+                  'X-Subscription-Token': this.env.BRAVE_SEARCH_API_KEY
+                }
+              });
+              
+              if (!response.ok) {
+                throw new Error(`Brave Search API returned ${response.status}: ${await response.text()}`);
+              }
+              
+              const data = await response.json();
+              
+              // Process the response to make it more usable for the AI
+              return this.processSearchResults(data);
+            }
+          })
+        },
+        maxSteps: 3 // Allow multiple search steps if needed
+      });
+      
+      // Update conversation history with the response
+      const updatedState = this.state ?? INITIAL_STATE;
+      this.setState({
+        ...updatedState,
+        conversationHistory: [
+          { role: "assistant" as const, content: text, timestamp: Date.now() },
+          ...(updatedState.conversationHistory || [])
+        ].slice(0, MAX_CONVERSATION_HISTORY)
+      });
+      
+      return text;
+    } catch (error) {
+      console.error("Error processing search:", error);
+      return `Sorry, I encountered an error while searching: ${error instanceof Error ? error.message : 'Unknown error'}`;
+    }
+  }
+  
+  // Process and format the search results to make them more usable for the AI
+  private processSearchResults(data: any) {
+    try {
+      const processed: any = {
+        query: data.query?.original,
+        alteredQuery: data.query?.altered,
+        totalResults: 0,
+        webResults: [],
+        newsResults: [],
+        videoResults: [],
+        faqResults: [],
+        discussionResults: [],
+        locationsResults: [],
+        infobox: null,
+        summary: null,
+      };
+      
+      // Extract web results
+      if (data.web?.results) {
+        processed.webResults = data.web.results.map((result: any) => ({
+          title: result.title,
+          url: result.url,
+          description: result.description,
+          source: result.meta_url?.hostname || new URL(result.url).hostname,
+          extraSnippets: result.extra_snippets || [],
+          age: result.age || null
+        }));
+        processed.totalResults += processed.webResults.length;
+      }
+      
+      // Extract news results
+      if (data.news?.results) {
+        processed.newsResults = data.news.results.map((result: any) => ({
+          title: result.title,
+          url: result.url,
+          description: result.description,
+          source: result.source || result.meta_url?.hostname || new URL(result.url).hostname,
+          age: result.age || null,
+          isBreaking: result.breaking || false
+        }));
+        processed.totalResults += processed.newsResults.length;
+      }
+      
+      // Extract video results
+      if (data.videos?.results) {
+        processed.videoResults = data.videos.results.map((result: any) => ({
+          title: result.title,
+          url: result.url,
+          description: result.description,
+          source: result.meta_url?.hostname || new URL(result.url).hostname,
+          duration: result.video?.duration || null,
+          thumbnail: result.thumbnail?.src || null
+        }));
+        processed.totalResults += processed.videoResults.length;
+      }
+      
+      // Extract FAQ results
+      if (data.faq?.results) {
+        processed.faqResults = data.faq.results.map((result: any) => ({
+          question: result.question,
+          answer: result.answer,
+          title: result.title,
+          url: result.url,
+          source: result.meta_url?.hostname || new URL(result.url).hostname
+        }));
+        processed.totalResults += processed.faqResults.length;
+      }
+      
+      // Extract discussion results
+      if (data.discussions?.results) {
+        processed.discussionResults = data.discussions.results.map((result: any) => ({
+          title: result.title,
+          url: result.url,
+          description: result.description,
+          forumName: result.data?.forum_name || null,
+          numAnswers: result.data?.num_answers || 0,
+          score: result.data?.score || null,
+          question: result.data?.question || null,
+          topComment: result.data?.top_comment || null
+        }));
+        processed.totalResults += processed.discussionResults.length;
+      }
+      
+      // Extract locations results
+      if (data.locations?.results) {
+        processed.locationsResults = data.locations.results.map((result: any) => ({
+          title: result.title,
+          id: result.id,
+          coordinates: result.coordinates || null,
+          address: result.postal_address?.displayAddress || null,
+          categories: result.categories || [],
+          rating: result.rating?.ratingValue || null,
+          reviewCount: result.rating?.reviewCount || null,
+          distance: result.distance ? `${result.distance.value} ${result.distance.units}` : null
+        }));
+        processed.totalResults += processed.locationsResults.length;
+      }
+      
+      // Extract infobox if available
+      if (data.infobox?.results) {
+        processed.infobox = {
+          type: data.infobox.results.subtype || 'generic',
+          title: data.infobox.results.title || data.infobox.results.label,
+          description: data.infobox.results.long_desc || '',
+          attributes: data.infobox.results.attributes || [],
+          thumbnail: data.infobox.results.thumbnail?.src || null
+        };
+      }
+      
+      // Extract summary if available
+      if (data.summarizer?.key) {
+        processed.summary = {
+          key: data.summarizer.key
+        };
+      }
+      
+      return processed;
+    } catch (error) {
+      console.error("Error processing search results:", error);
+      return data; // Fall back to returning the raw data if processing fails
+    }
+  }
+  
+  // Override onStateUpdate to handle state changes if needed
+  override onStateUpdate(state: BraveSearchState | undefined, source: Connection | "server"): void {
+    console.log("State updated from source:", source);
+  }
+}
 
-// Export the default fetch handler
+// Create a simple implementation of the search functionality
+// This bypasses the agent framework for direct testing
+async function handleSearchRequest(request: Request, env: any): Promise<Response> {
+  try {
+    // Parse the request body
+    const body = await request.json() as any;
+    const { query } = body;
+    
+    if (!query) {
+      return new Response(JSON.stringify({ error: "Query is required" }), { 
+        status: 400,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    
+    // Build the URL with parameters
+    const url = new URL('https://api.search.brave.com/res/v1/web/search');
+    url.searchParams.append('q', query);
+    url.searchParams.append('count', '5'); // Limit to 5 results for testing
+    
+    // Make the API request
+    const response = await fetch(url.toString(), {
+      headers: {
+        'Accept': 'application/json',
+        'Accept-Encoding': 'gzip',
+        'X-Subscription-Token': env.BRAVE_SEARCH_API_KEY
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Brave Search API returned ${response.status}: ${await response.text()}`);
+    }
+    
+    const data = await response.json() as any;
+    
+    // Return a simplified response
+    return new Response(JSON.stringify({
+      query,
+      results: data.web?.results || [],
+      total: data.web?.results?.length || 0
+    }), {
+      headers: { "Content-Type": "application/json" }
+    });
+  } catch (error) {
+    console.error("Error processing search:", error);
+    return new Response(JSON.stringify({ error: "Error processing search" }), { 
+      status: 500,
+      headers: { "Content-Type": "application/json" }
+    });
+  }
+}
+
 export default {
-  fetch: app.fetch
+  async fetch(request: Request, env: any, ctx: ExecutionContext): Promise<Response> {
+    try {
+      console.log("Request URL:", request.url);
+      console.log("Available bindings:", Object.keys(env));
+      
+      const url = new URL(request.url);
+      
+      // Handle search requests directly without using the agent framework
+      if (url.pathname.includes('/agents/brave-search/default/search')) {
+        console.log("Handling search request directly");
+        return handleSearchRequest(request, env);
+      }
+      
+      // For other requests, try the standard agent routing
+      try {
+        const response = await routeAgentRequest(request, env, {
+          cors: true
+        });
+        
+        if (response) {
+          return response;
+        }
+      } catch (routingError) {
+        console.error("Standard routing failed:", routingError);
+      }
+      
+      // Return a 404 if no route matched
+      return new Response("No agent route matched", { status: 404 });
+    } catch (error) {
+      console.error("Error handling request:", error);
+      return new Response(`Error handling request: ${error instanceof Error ? error.message : 'Unknown error'}`, { status: 500 });
+    }
+  },
 };

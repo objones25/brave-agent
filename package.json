@@ -1,22 +1,22 @@
 {
-  "name": "brave-agent",
+  "name": "brave-search-agent",
   "version": "1.0.0",
-  "description": "Brave search agent using Cloudflare Agents and Google Gemini function calling",
+  "description": "A Cloudflare Workers AI agent for Brave Search",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "wrangler dev src/index.ts",
-    "build": "tsc",
+    "dev": "wrangler dev",
     "deploy": "wrangler deploy"
   },
   "dependencies": {
-    "@google/genai": "^0.15.0",
     "agents": "^0.0.88",
-    "hono": "^4.7.10",
-    "wrangler": "^3.0.0"
+    "ai": "^4.3.16",
+    "workers-ai-provider": "^0.1.0",
+    "zod": "^3.22.4"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.0.0",
-    "@types/node": "^20.0.0",
-    "typescript": "^5.0.0"
-  }
+    "@cloudflare/workers-types": "^4.20240320.1",
+    "typescript": "^5.3.3",
+    "wrangler": "^4.0.0"
+  },
+  "license": "MIT"
 }

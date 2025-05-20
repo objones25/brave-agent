@@ -1,14 +1,17 @@
-name = "brave-agent"
+name = "brave-search-agent"
 main = "src/index.ts"
-compatibility_date = "2023-10-30"
+compatibility_date = "2023-12-01"
 compatibility_flags = ["nodejs_compat"]
 
-[vars]
-# Define your environment variables here
-# BRAVE_API_KEY will be loaded from .dev.vars during development
+[ai]
+binding = "AI"
 
+[vars]
+BRAVE_SEARCH_API_KEY = ""
+
+# Standard Durable Object binding syntax
 [[durable_objects.bindings]]
-name = "BRAVE_AGENT"
+name = "BRAVE_SEARCH_AGENT"
 class_name = "BraveSearchAgent"
 
 [[migrations]]
