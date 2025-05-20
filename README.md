@@ -53,7 +53,7 @@ The agent is fully functional with robust parameter handling and type validation
 
 ### HTTP Endpoints
 
-- **Search**: `POST /agents/brave-search/default/search`
+- **Search**: `POST /agents/brave-search-agent/default/search`
   ```json
   {
     "query": "your search query",
@@ -65,9 +65,9 @@ The agent is fully functional with robust parameter handling and type validation
   }
   ```
 
-- **Get State**: `GET /agents/brave-search/default/state`
+- **Get State**: `GET /agents/brave-search-agent/default/state`
 
-- **Update Preferences**: `POST /agents/brave-search/default/preferences`
+- **Update Preferences**: `POST /agents/brave-search-agent/default/preferences`
   ```json
   {
     "safesearch": "strict",
@@ -76,7 +76,33 @@ The agent is fully functional with robust parameter handling and type validation
   }
   ```
 
-- **Clear History**: `POST /agents/brave-search/default/clear-history`
+- **Clear History**: `POST /agents/brave-search-agent/default/clear-history`
+
+### Example curl Commands
+
+- **Search**:
+  ```bash
+  curl -X POST http://localhost:8787/agents/brave-search-agent/default/search \
+    -H "Content-Type: application/json" \
+    -d '{"query": "weather in San Francisco"}'
+  ```
+
+- **Get State**:
+  ```bash
+  curl -X GET http://localhost:8787/agents/brave-search-agent/default/state
+  ```
+
+- **Update Preferences**:
+  ```bash
+  curl -X POST http://localhost:8787/agents/brave-search-agent/default/preferences \
+    -H "Content-Type: application/json" \
+    -d '{"safesearch": "strict", "count": 20, "country": "GB"}'
+  ```
+
+- **Clear History**:
+  ```bash
+  curl -X POST http://localhost:8787/agents/brave-search-agent/default/clear-history
+  ```
 
 ### WebSocket Interface
 

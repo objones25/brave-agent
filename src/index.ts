@@ -474,7 +474,7 @@ export class BraveSearchAgent extends Agent<{
           }
         })
       },
-      maxSteps: 5, // Increase max steps to allow for more interaction with search tool
+      maxSteps: 10, // Increase max steps to allow for more interaction with search tool
       temperature: 0.7 // Add some variety to responses
     });
     
