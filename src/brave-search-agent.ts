@@ -44,13 +44,19 @@ export class BraveSearchAgent extends Agent<Env, BraveAgentState> {
       const params: BraveWebSearchParams = {
         q: args.query,
         count: args.count || 10,
+        offset: args.offset,
         country: args.country,
         search_lang: args.search_lang,
+        ui_lang: args.ui_lang,
         safesearch: args.safesearch as 'off' | 'moderate' | 'strict',
         freshness: args.freshness,
+        text_decorations: args.text_decorations !== undefined ? args.text_decorations : true,
+        spellcheck: args.spellcheck !== undefined ? args.spellcheck : true,
         result_filter: args.result_filter,
-        spellcheck: true,
-        text_decorations: true
+        units: args.units,
+        extra_snippets: args.extra_snippets,
+        summary: args.summary,
+        goggles: args.goggles
       };
 
       // Build the URL with query parameters
@@ -132,11 +138,19 @@ export class BraveSearchAgent extends Agent<Env, BraveAgentState> {
       const searchResults = await this.performBraveSearch({
         query: request.query,
         count: request.options?.count,
+        offset: request.options?.offset,
         country: request.options?.country,
         search_lang: request.options?.search_lang,
+        ui_lang: request.options?.ui_lang,
         safesearch: request.options?.safesearch as 'off' | 'moderate' | 'strict',
         freshness: request.options?.freshness,
-        result_filter: request.options?.result_filter
+        text_decorations: request.options?.text_decorations,
+        spellcheck: request.options?.spellcheck,
+        result_filter: request.options?.result_filter,
+        units: request.options?.units,
+        extra_snippets: request.options?.extra_snippets,
+        summary: request.options?.summary,
+        goggles: request.options?.goggles
       });
 
       return {

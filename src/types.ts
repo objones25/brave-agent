@@ -412,11 +412,19 @@ export interface RichCallbackInfo {
 export interface BraveWebSearchFunctionArgs {
   query: string;
   count?: number;
+  offset?: number;
   country?: string;
   search_lang?: string;
+  ui_lang?: string;
   safesearch?: string;
   freshness?: string;
+  text_decorations?: boolean;
+  spellcheck?: boolean;
   result_filter?: string;
+  units?: string;
+  extra_snippets?: boolean;
+  summary?: boolean;
+  goggles?: string[];
 }
 
 export interface BraveSearchFunctionResponse {

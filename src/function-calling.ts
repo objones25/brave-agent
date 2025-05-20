@@ -55,6 +55,22 @@ export const braveSearchAgentSystemPrompt = `You are a proactive, intelligent Br
    - Use higher counts for complex queries requiring multiple sources
    - Use lower counts for simple factual queries
 
+6. PAGINATION PARAMETERS:
+   - Use 'offset' parameter for paginated results (default: 0)
+   - Use 'offset' with 'count' to retrieve subsequent pages of results
+   - Increase 'count' (up to 20) for comprehensive searches
+
+7. LANGUAGE AND DISPLAY PARAMETERS:
+   - Use 'search_lang' for the language of search results
+   - Use 'ui_lang' for the language of UI elements in response
+   - Use 'text_decorations=true' when highlighting terms is helpful
+   - Use 'extra_snippets=true' for additional context in results
+
+8. SEARCH ENHANCEMENT PARAMETERS:
+   - Use 'spellcheck=true' to correct potential typos in queries
+   - Use 'summary=true' to generate concise summaries of results
+   - Use 'goggles' for custom re-ranking when specialized results are needed
+
 ### SEARCH QUERY OPTIMIZATION:
 1. Keep search queries concise and focused
 2. Use specific keywords rather than full sentences
@@ -106,6 +122,10 @@ export const braveWebSearchFunctionDeclaration = {
         type: Type.NUMBER,
         description: 'Number of search results to return (default: 10, max: 20).'
       },
+      offset: {
+        type: Type.NUMBER,
+        description: 'Zero-based offset for pagination (default: 0).'
+      },
       country: {
         type: Type.STRING,
         description: 'The search query country (2-letter code, e.g., "US", "GB", "DE").'
@@ -113,6 +133,10 @@ export const braveWebSearchFunctionDeclaration = {
       search_lang: {
         type: Type.STRING,
         description: 'The search language preference (e.g., "en", "fr", "de").'
+      },
+      ui_lang: {
+        type: Type.STRING,
+        description: 'User interface language preferred in response (e.g., "en", "fr", "de").'
       },
       safesearch: {
         type: Type.STRING,
@@ -124,9 +148,37 @@ export const braveWebSearchFunctionDeclaration = {
         enum: ['pd', 'pw', 'pm', 'py'],
         description: 'Filter by discovery time. "pd": Last 24 hours, "pw": Last 7 days, "pm": Last 31 days, "py": Last 365 days.'
       },
+      text_decorations: {
+        type: Type.BOOLEAN,
+        description: 'Whether to include decoration markers in results.'
+      },
+      spellcheck: {
+        type: Type.BOOLEAN,
+        description: 'Whether to spellcheck the query.'
+      },
       result_filter: {
         type: Type.STRING,
         description: 'Comma-delimited string of result types to include (e.g., "web,news,videos").'
+      },
+      units: {
+        type: Type.STRING,
+        enum: ['metric', 'imperial'],
+        description: 'Measurement units to use in results.'
+      },
+      extra_snippets: {
+        type: Type.BOOLEAN,
+        description: 'Whether to get additional snippets for more context.'
+      },
+      summary: {
+        type: Type.BOOLEAN,
+        description: 'Enable summary key generation for search results.'
+      },
+      goggles: {
+        type: Type.ARRAY,
+        items: {
+          type: Type.STRING
+        },
+        description: 'Custom re-ranking on top of Brave\'s search index.'
       }
     },
     required: ['query']
@@ -203,11 +255,19 @@ export class GeminiFunctionCaller {
           const searchResults = await this.braveSearchFunction({
             query: args.query as string,
             count: args.count as number | undefined,
+            offset: args.offset as number | undefined,
             country: args.country as string | undefined,
             search_lang: args.search_lang as string | undefined,
+            ui_lang: args.ui_lang as string | undefined,
             safesearch: args.safesearch as string | undefined,
             freshness: args.freshness as string | undefined,
-            result_filter: args.result_filter as string | undefined
+            text_decorations: args.text_decorations as boolean | undefined,
+            spellcheck: args.spellcheck as boolean | undefined,
+            result_filter: args.result_filter as string | undefined,
+            units: args.units as string | undefined,
+            extra_snippets: args.extra_snippets as boolean | undefined,
+            summary: args.summary as boolean | undefined,
+            goggles: args.goggles as string[] | undefined
           });
           
           // Create a function response part
