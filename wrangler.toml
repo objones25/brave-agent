@@ -5,6 +5,7 @@ compatibility_flags = ["nodejs_compat"]
 
 [vars]
 BRAVE_SEARCH_API_KEY = ""
+BRAVE_SUGGEST_API_KEY = ""
 GEMINI_API_KEY = ""
 
 # Standard Durable Object binding syntax
