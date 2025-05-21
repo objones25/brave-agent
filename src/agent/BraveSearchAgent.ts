@@ -669,7 +669,7 @@ export class BraveSearchAgent extends Agent<{
       const { text } = await generateText({
         model,
         system: SYSTEM_PROMPT,
-        prompt: query,
+        prompt: `Answer the following query by using the braveSearch and braveSuggest tools to gather accurate information. Make multiple search queries to cover different aspects of the question. IMPORTANT: You must actually call the tools, not just describe what you would search for.\n\nQuery: ${query}`,
         tools: {
           braveSearch: tool({
             description: "Search the web using Brave Search to find relevant information for the user's query.",
