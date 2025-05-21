@@ -1,7 +1,24 @@
 import { Agent, type AgentContext, type Connection, type WSMessage } from "agents";
 import { generateText, tool } from "ai";
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { BraveSearchState, braveSearchSchema, braveSuggestSchema } from "../types";
+import { 
+  braveSearchSchema, 
+  braveSuggestSchema
+} from "../types";
+import type { 
+  BraveSearchState, 
+  SearchOptions,
+  SearchResult,
+  SuggestOptions,
+  SuggestResponse,
+  NewsResult,
+  VideoResult,
+  FaqResult,
+  DiscussionResult,
+  LocationResult,
+  WebResult
+} from "../types";
+import { braveWebSearch } from "../api/braveSearch";
 import { INITIAL_STATE, MAX_RECENT_SEARCHES, MAX_CONVERSATION_HISTORY, SYSTEM_PROMPT } from "../config";
 import searchWeb from "../api/braveSearch";
 import getSuggestions from "../api/suggest";
@@ -27,8 +44,46 @@ export class BraveSearchAgent extends Agent<{
 
       const data = JSON.parse(message) as any;
       
-      // Handle search requests via WebSocket
+      // Handle direct search requests via WebSocket
       if (data.type === "search_request") {
+        const { query, options } = data;
+        
+        // Process the direct search
+        const response = await this.directSearch(query, options || {});
+        
+        // Send the response back through the WebSocket
+        connection.send(JSON.stringify({
+          type: "search_response",
+          query,
+          response
+        }));
+        
+        return;
+      }
+      
+      // Handle optimized search requests via WebSocket
+      if (data.type === "optimized_search_request") {
+        const { query, searchOptions, suggestOptions } = data;
+        
+        // Process the optimized search
+        const response = await this.optimizedSearch(
+          query, 
+          searchOptions || {}, 
+          suggestOptions || {}
+        );
+        
+        // Send the response back through the WebSocket
+        connection.send(JSON.stringify({
+          type: "optimized_search_response",
+          query,
+          response
+        }));
+        
+        return;
+      }
+      
+      // Handle agentic search requests via WebSocket
+      if (data.type === "agentic_search_request") {
         const { query, preferences } = data;
         
         // Update preferences if provided
@@ -43,12 +98,12 @@ export class BraveSearchAgent extends Agent<{
           });
         }
         
-        // Process the search
-        const response = await this.search(query);
+        // Process the agentic search
+        const response = await this.agenticSearch(query);
         
         // Send the response back through the WebSocket
         connection.send(JSON.stringify({
-          type: "search_response",
+          type: "agentic_search_response",
           query,
           response
         }));
@@ -123,13 +178,86 @@ export class BraveSearchAgent extends Agent<{
   override async onRequest(request: Request): Promise<Response> {
     const url = new URL(request.url);
     
-    // Search endpoint
+    // Direct search endpoint
     if (url.pathname.endsWith("/search") && request.method === "POST") {
       try {
-        const body = await request.json() as any;
-        const { query, preferences } = body;
+        const body = await request.json() as { 
+          query: string; 
+          options?: SearchOptions;
+        };
         
-        if (!query) {
+        if (!body.query) {
+          return new Response(JSON.stringify({ error: "Query is required" }), { 
+            status: 400,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        
+        // Process the direct search
+        const response = await this.directSearch(body.query, body.options || {});
+        
+        return new Response(JSON.stringify({ query: body.query, response }), {
+          headers: { "Content-Type": "application/json" }
+        });
+      } catch (error) {
+        console.error("Error processing direct search:", error);
+        return new Response(JSON.stringify({ 
+          error: "Error processing direct search",
+          details: error instanceof Error ? error.message : String(error)
+        }), { 
+          status: 500,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+    }
+    
+    // Optimized search endpoint
+    if (url.pathname.endsWith("/optimized-search") && request.method === "POST") {
+      try {
+        const body = await request.json() as { 
+          query: string; 
+          searchOptions?: SearchOptions;
+          suggestOptions?: SuggestOptions;
+        };
+        
+        if (!body.query) {
+          return new Response(JSON.stringify({ error: "Query is required" }), { 
+            status: 400,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        
+        // Process the optimized search
+        const response = await this.optimizedSearch(
+          body.query, 
+          body.searchOptions || {}, 
+          body.suggestOptions || {}
+        );
+        
+        return new Response(JSON.stringify({ query: body.query, response }), {
+          headers: { "Content-Type": "application/json" }
+        });
+      } catch (error) {
+        console.error("Error processing optimized search:", error);
+        return new Response(JSON.stringify({ 
+          error: "Error processing optimized search",
+          details: error instanceof Error ? error.message : String(error)
+        }), { 
+          status: 500,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+    }
+    
+    // Agentic search endpoint
+    if (url.pathname.endsWith("/agentic-search") && request.method === "POST") {
+      try {
+        const body = await request.json() as { 
+          query: string; 
+          preferences?: BraveSearchState['preferences'];
+        };
+        
+        if (!body.query) {
           return new Response(JSON.stringify({ error: "Query is required" }), { 
             status: 400,
             headers: { "Content-Type": "application/json" }
@@ -137,26 +265,29 @@ export class BraveSearchAgent extends Agent<{
         }
         
         // Update preferences if provided
-        if (preferences) {
+        if (body.preferences) {
           const state = this.state ?? INITIAL_STATE;
           this.setState({
             ...state,
             preferences: {
               ...state.preferences,
-              ...preferences
+              ...body.preferences
             }
           });
         }
         
-        // Process the search
-        const response = await this.search(query);
+        // Process the agentic search
+        const response = await this.agenticSearch(body.query);
         
-        return new Response(JSON.stringify({ query, response }), {
+        return new Response(JSON.stringify({ query: body.query, response }), {
           headers: { "Content-Type": "application/json" }
         });
       } catch (error) {
-        console.error("Error processing search:", error);
-        return new Response(JSON.stringify({ error: "Error processing search" }), { 
+        console.error("Error processing agentic search:", error);
+        return new Response(JSON.stringify({ 
+          error: "Error processing agentic search",
+          details: error instanceof Error ? error.message : String(error)
+        }), { 
           status: 500,
           headers: { "Content-Type": "application/json" }
         });
@@ -253,8 +384,179 @@ export class BraveSearchAgent extends Agent<{
     return super.onRequest(request);
   }
 
-  // Process search queries
-  async search(query: string): Promise<string> {
+  // Direct search - calls the Brave Search API directly
+  async directSearch(
+    query: string,
+    options: SearchOptions
+  ): Promise<SearchResult> {
+    console.log("Executing direct Brave search for:", query);
+    
+    // Update search history
+    this.updateSearchHistory(query);
+    
+    // Call the Brave Search API directly
+    return await braveWebSearch(query, options, this.env.BRAVE_SEARCH_API_KEY);
+  }
+  
+  // Optimized search - uses suggest API to get optimized queries, then calls search API
+  async optimizedSearch(
+    query: string, 
+    searchOptions: SearchOptions,
+    suggestOptions: SuggestOptions = {}
+  ): Promise<SearchResult & { sources: string[] }> {
+    console.log("Executing optimized Brave search for:", query);
+    
+    // Update search history
+    this.updateSearchHistory(query);
+    
+    // Set default suggest options if not provided
+    const finalSuggestOptions: SuggestOptions = {
+      count: suggestOptions.count || 3,
+      country: suggestOptions.country || searchOptions.country,
+      lang: suggestOptions.lang || searchOptions.search_lang,
+      ...suggestOptions
+    };
+    
+    // Get suggestions first
+    const suggestResponse = await getSuggestions(
+      query, 
+      finalSuggestOptions, 
+      this.env.BRAVE_SUGGEST_API_KEY
+    );
+    
+    // Use original query and suggestions for search
+    const queries = [query];
+    
+    // Add suggestions to queries if available
+    if (suggestResponse.results && suggestResponse.results.length > 0) {
+      // Add suggestions to the queries array
+      for (const suggestion of suggestResponse.results) {
+        queries.push(suggestion.query);
+      }
+    }
+    
+    // Execute searches for all queries
+    const searchResults = await Promise.all(
+      queries.map(q => braveWebSearch(q, searchOptions, this.env.BRAVE_SEARCH_API_KEY))
+    );
+    
+    // Merge and deduplicate results
+    const mergedResults = this.mergeSearchResults(searchResults, queries);
+    
+    return mergedResults;
+  }
+  
+  /**
+   * Merges multiple search results into a single result with deduplication
+   * 
+   * @param results Array of search results to merge
+   * @param queries Array of queries that produced these results
+   * @returns Merged and deduplicated search result
+   */
+  private mergeSearchResults(
+    results: SearchResult[], 
+    queries: string[]
+  ): SearchResult & { sources: string[] } {
+    if (results.length === 0) {
+      throw new Error("No search results to merge");
+    }
+    
+    // Use the first result as the base
+    const mergedResult: SearchResult & { sources: string[] } = {
+      ...results[0],
+      sources: [queries[0]],
+      webResults: [...results[0].webResults],
+      newsResults: [...results[0].newsResults],
+      videoResults: [...results[0].videoResults],
+      faqResults: [...results[0].faqResults],
+      discussionResults: [...results[0].discussionResults],
+      locationsResults: [...results[0].locationsResults]
+    };
+    
+    // Track URLs to avoid duplicates
+    const seenUrls = new Set<string>(
+      mergedResult.webResults.map((result: WebResult) => result.url)
+    );
+    
+    // Merge additional results
+    for (let i = 1; i < results.length; i++) {
+      const result = results[i];
+      
+      // Add source query
+      mergedResult.sources.push(queries[i]);
+      
+      // Merge web results with deduplication
+      for (const webResult of result.webResults) {
+        if (!seenUrls.has(webResult.url)) {
+          mergedResult.webResults.push(webResult);
+          seenUrls.add(webResult.url);
+        }
+      }
+      
+      // Deduplicate news results
+      const seenNewsUrls = new Set<string>(
+        mergedResult.newsResults.map((item: NewsResult) => item.url)
+      );
+      for (const newsResult of result.newsResults) {
+        if (!seenNewsUrls.has(newsResult.url)) {
+          mergedResult.newsResults.push(newsResult);
+          seenNewsUrls.add(newsResult.url);
+        }
+      }
+      
+      // Deduplicate video results
+      const seenVideoUrls = new Set<string>(
+        mergedResult.videoResults.map((item: VideoResult) => item.url)
+      );
+      for (const videoResult of result.videoResults) {
+        if (!seenVideoUrls.has(videoResult.url)) {
+          mergedResult.videoResults.push(videoResult);
+          seenVideoUrls.add(videoResult.url);
+        }
+      }
+      
+      // Deduplicate FAQ results
+      const seenFaqUrls = new Set<string>(
+        mergedResult.faqResults.map((item: FaqResult) => item.url)
+      );
+      for (const faqResult of result.faqResults) {
+        if (!seenFaqUrls.has(faqResult.url)) {
+          mergedResult.faqResults.push(faqResult);
+          seenFaqUrls.add(faqResult.url);
+        }
+      }
+      
+      // Deduplicate discussion results
+      const seenDiscussionUrls = new Set<string>(
+        mergedResult.discussionResults.map((item: DiscussionResult) => item.url)
+      );
+      for (const discussionResult of result.discussionResults) {
+        if (!seenDiscussionUrls.has(discussionResult.url)) {
+          mergedResult.discussionResults.push(discussionResult);
+          seenDiscussionUrls.add(discussionResult.url);
+        }
+      }
+      
+      // Deduplicate location results
+      const seenLocationIds = new Set<string>(
+        mergedResult.locationsResults.map((item: LocationResult) => item.id)
+      );
+      for (const locationResult of result.locationsResults) {
+        if (!seenLocationIds.has(locationResult.id)) {
+          mergedResult.locationsResults.push(locationResult);
+          seenLocationIds.add(locationResult.id);
+        }
+      }
+    }
+    
+    // Update total results count
+    mergedResult.totalResults = mergedResult.webResults.length;
+    
+    return mergedResult;
+  }
+  
+  // Agentic search - uses AI to process search results
+  async agenticSearch(query: string): Promise<string> {
     try {
       console.log("Starting search process for:", query);
       
@@ -303,7 +605,7 @@ export class BraveSearchAgent extends Agent<{
   }
   
   // Process suggest queries
-  async getSuggestions(query: string, options: any = {}): Promise<any> {
+  async getSuggestions(query: string, options: SuggestOptions = {}): Promise<SuggestResponse> {
     try {
       return await getSuggestions(query, options, this.env.BRAVE_SUGGEST_API_KEY);
     } catch (error) {

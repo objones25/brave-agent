@@ -4,7 +4,7 @@ import { BraveSearchAgent } from "./agent/BraveSearchAgent";
 // Export the BraveSearchAgent class
 export { BraveSearchAgent };
 
-// Export the braveWebSearch and braveSuggest functions for direct API access
+// Export the API functions for direct access
 export { braveWebSearch } from "./api/braveSearch";
 export { braveSuggest } from "./api/suggest";
 
