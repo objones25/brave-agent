@@ -18,6 +18,7 @@ The agent is fully functional with robust parameter handling, type validation, a
   - **Direct Search**: Standard web search using Brave Search API
   - **Optimized Search**: Enhanced search using query suggestions to improve results
   - **Agentic Search**: AI-powered search using Google's Gemini Pro model
+  - **AI Search**: AI-powered search with configurable optimization and graceful error handling
 - Get query suggestions from Brave Suggest API
 - Detailed performance logging with timing information for each step
 - Customize search parameters (count, safesearch, country, etc.)
@@ -103,6 +104,19 @@ The agent is fully functional with robust parameter handling, type validation, a
   }
   ```
 
+- **AI Search**: `POST /agents/brave-search-agent/default/ai-search`
+  ```json
+  {
+    "query": "your search query",
+    "options": {
+      "safesearch": "moderate",
+      "count": 10,
+      "country": "US"
+    },
+    "optimize": true
+  }
+  ```
+
 - **Suggest**: `POST /agents/brave-search-agent/default/suggest`
   ```json
   {
@@ -148,6 +162,20 @@ The agent is fully functional with robust parameter handling, type validation, a
   curl -X POST http://localhost:8787/agents/brave-search-agent/default/agentic-search \
     -H "Content-Type: application/json" \
     -d '{"query": "What are the best restaurants in New York City?"}'
+  ```
+
+- **AI Search**:
+  ```bash
+  curl -X POST http://localhost:8787/agents/brave-search-agent/default/ai-search \
+    -H "Content-Type: application/json" \
+    -d '{"query": "What are the benefits of renewable energy?", "options": {"count": 15, "safesearch": "moderate"}}'
+  ```
+
+- **AI Search with optimization disabled**:
+  ```bash
+  curl -X POST "http://localhost:8787/agents/brave-search-agent/default/ai-search?optimize=false" \
+    -H "Content-Type: application/json" \
+    -d '{"query": "What are the benefits of renewable energy?"}'
   ```
 
 - **Suggest**:
@@ -197,6 +225,20 @@ The agent is fully functional with robust parameter handling, type validation, a
   curl -X POST https://brave-search-agent.ap-a98.workers.dev/agents/brave-search-agent/default/agentic-search \
     -H "Content-Type: application/json" \
     -d '{"query": "How does quantum computing work and what are its practical applications?"}'
+  ```
+
+- **AI Search** - Climate change analysis:
+  ```bash
+  curl -X POST https://brave-search-agent.ap-a98.workers.dev/agents/brave-search-agent/default/ai-search \
+    -H "Content-Type: application/json" \
+    -d '{"query": "What are the latest developments in climate change mitigation?", "options": {"count": 20, "safesearch": "moderate"}}'
+  ```
+
+- **AI Search with optimization disabled** - Technology trends:
+  ```bash
+  curl -X POST "https://brave-search-agent.ap-a98.workers.dev/agents/brave-search-agent/default/ai-search?optimize=false" \
+    -H "Content-Type: application/json" \
+    -d '{"query": "What are the emerging technology trends for 2025?"}'
   ```
 
 - **Suggest** - Machine learning queries:
@@ -262,6 +304,19 @@ Connect to `/agents/brave-search/default` and send JSON messages:
     "preferences": {
       "safesearch": "moderate"
     }
+  }
+  ```
+
+- **AI Search Request**:
+  ```json
+  {
+    "type": "ai_search_request",
+    "query": "What are the benefits of renewable energy?",
+    "options": {
+      "safesearch": "moderate",
+      "count": 10
+    },
+    "optimize": true
   }
   ```
 
@@ -345,6 +400,7 @@ All logs follow a consistent format with prefixes to indicate the type of log:
 - `[BRAVE_SUGGEST]`: Logs information about Brave Suggest API calls
 - `[MERGE]`: Logs information about result merging operations
 - `[AGENTIC]`: Logs information about AI-powered search operations
+- `[AI_SEARCH]`: Logs information about AI search operations
 - `[ERROR]`: Logs error information
 
 ### Example Log Output

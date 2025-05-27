@@ -19,7 +19,7 @@ import type {
   WebResult
 } from "../types";
 import { braveWebSearch } from "../api/braveSearch";
-import { INITIAL_STATE, MAX_RECENT_SEARCHES, MAX_CONVERSATION_HISTORY, SYSTEM_PROMPT } from "../config";
+import { INITIAL_STATE, MAX_RECENT_SEARCHES, MAX_CONVERSATION_HISTORY, SYSTEM_PROMPT, AI_SEARCH_SYSTEM_PROMPT } from "../config";
 import searchWeb from "../api/braveSearch";
 import getSuggestions from "../api/suggest";
 
@@ -105,6 +105,23 @@ export class BraveSearchAgent extends Agent<{
         // Send the response back through the WebSocket
         connection.send(JSON.stringify({
           type: "agentic_search_response",
+          query,
+          response
+        }));
+        
+        return;
+      }
+      
+      // Handle AI search requests via WebSocket
+      if (data.type === "ai_search_request") {
+        const { query, options, optimize } = data;
+        
+        // Process the AI search
+        const response = await this.aiSearch(query, options || {}, optimize !== false);
+        
+        // Send the response back through the WebSocket
+        connection.send(JSON.stringify({
+          type: "ai_search_response",
           query,
           response
         }));
@@ -287,6 +304,44 @@ export class BraveSearchAgent extends Agent<{
         console.error("Error processing agentic search:", error);
         return new Response(JSON.stringify({ 
           error: "Error processing agentic search",
+          details: error instanceof Error ? error.message : String(error)
+        }), { 
+          status: 500,
+          headers: { "Content-Type": "application/json" }
+        });
+      }
+    }
+    
+    // AI search endpoint
+    if (url.pathname.endsWith("/ai-search") && request.method === "POST") {
+      try {
+        const body = await request.json() as { 
+          query: string; 
+          options?: SearchOptions;
+          optimize?: boolean;
+        };
+        
+        if (!body.query) {
+          return new Response(JSON.stringify({ error: "Query is required" }), { 
+            status: 400,
+            headers: { "Content-Type": "application/json" }
+          });
+        }
+        
+        // Get optimize parameter from query string or body
+        const optimizeParam = url.searchParams.get('optimize');
+        const enableOptimization = optimizeParam !== null ? optimizeParam === 'true' : (body.optimize !== false);
+        
+        // Process the AI search
+        const response = await this.aiSearch(body.query, body.options || {}, enableOptimization);
+        
+        return new Response(JSON.stringify({ query: body.query, response }), {
+          headers: { "Content-Type": "application/json" }
+        });
+      } catch (error) {
+        console.error("Error processing AI search:", error);
+        return new Response(JSON.stringify({ 
+          error: "Error processing AI search",
           details: error instanceof Error ? error.message : String(error)
         }), { 
           status: 500,
@@ -723,6 +778,77 @@ export class BraveSearchAgent extends Agent<{
       console.error(`[ERROR] Agentic search failed after ${totalDuration}ms:`, error);
       return `Sorry, I encountered an error while searching: ${error instanceof Error ? error.message : 'Unknown error'}`;
     }
+  }
+  
+  // AI search - calls Brave API and feeds results to generateText with simplified system prompt
+  async aiSearch(
+    query: string,
+    options: SearchOptions = {},
+    enableOptimization: boolean = true
+  ): Promise<string> {
+    const startTime = Date.now();
+    console.log(`[AI_SEARCH] AI search started for: "${query}"`);
+    console.log(`[AI_SEARCH] Options: ${JSON.stringify(options)}, optimization: ${enableOptimization}`);
+    
+    // Update search history
+    const historyStartTime = Date.now();
+    this.updateSearchHistory(query);
+    const historyEndTime = Date.now();
+    console.log(`[TIMING] AI search - Update history: ${historyEndTime - historyStartTime}ms`);
+    
+    // Get search results - use optimized search if enabled, otherwise direct search
+    let searchResults: any;
+    let searchError: string | null = null;
+    
+    try {
+      if (enableOptimization) {
+        console.log(`[AI_SEARCH] Using optimized search`);
+        const optimizedResults = await this.optimizedSearch(query, options);
+        searchResults = optimizedResults;
+      } else {
+        console.log(`[AI_SEARCH] Using direct search`);
+        searchResults = await this.directSearch(query, options);
+      }
+    } catch (error) {
+      console.log(`[AI_SEARCH] Search failed, passing error to AI: ${error instanceof Error ? error.message : String(error)}`);
+      searchError = error instanceof Error ? error.message : String(error);
+      searchResults = { error: searchError, query };
+    }
+    
+    // Initialize AI model
+    const aiInitStartTime = Date.now();
+    const googleAI = createGoogleGenerativeAI({ apiKey: this.env.GEMINI_API_KEY });
+    const model = googleAI("gemini-1.5-pro");
+    const aiInitEndTime = Date.now();
+    console.log(`[TIMING] AI search - Initialize AI model: ${aiInitEndTime - aiInitStartTime}ms`);
+    
+    // Prepare search results for AI processing
+    const searchContext = JSON.stringify(searchResults, null, 2);
+    
+    console.log(`[AI_SEARCH] Generating AI response for query: "${query}"`);
+    const generateStartTime = Date.now();
+    const { text } = await generateText({
+      model,
+      system: AI_SEARCH_SYSTEM_PROMPT,
+      prompt: `User Query: ${query}\n\nSearch Results:\n${searchContext}\n\nPlease analyze these search results and provide a comprehensive response to the user's query.${searchError ? '\n\nNote: There was an issue with the search API, but please provide the best response you can based on the available information.' : ''}`,
+      temperature: 0.7
+    });
+    const generateEndTime = Date.now();
+    console.log(`[TIMING] AI search - Generate text: ${generateEndTime - generateStartTime}ms`);
+    
+    console.log(`[AI_SEARCH] AI generated response (first 100 chars): ${text.substring(0, 100)}...`);
+    
+    // Update conversation history with the response
+    const updateHistoryStartTime = Date.now();
+    this.updateConversationHistory("assistant", text);
+    const updateHistoryEndTime = Date.now();
+    console.log(`[TIMING] AI search - Update conversation history: ${updateHistoryEndTime - updateHistoryStartTime}ms`);
+    
+    const endTime = Date.now();
+    const totalDuration = endTime - startTime;
+    console.log(`[TIMING] AI search - Total execution time: ${totalDuration}ms`);
+    
+    return text;
   }
   
   // Process suggest queries
