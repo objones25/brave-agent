@@ -127,7 +127,7 @@ The agent is fully functional with robust parameter handling, type validation, a
 
 - **Clear History**: `POST /agents/brave-search-agent/default/clear-history`
 
-### Example curl Commands
+### Local Development Examples
 
 - **Direct Search**:
   ```bash
@@ -172,6 +172,55 @@ The agent is fully functional with robust parameter handling, type validation, a
 - **Clear History**:
   ```bash
   curl -X POST http://localhost:8787/agents/brave-search-agent/default/clear-history
+  ```
+
+### Production API Examples
+
+**Note**: These examples use the deployed Worker. Make sure you have set up your API keys using `wrangler secret put` as described in the Deployment section.
+
+- **Direct Search** - Latest AI developments:
+  ```bash
+  curl -X POST https://brave-search-agent.ap-a98.workers.dev/agents/brave-search-agent/default/search \
+    -H "Content-Type: application/json" \
+    -d '{"query": "latest AI developments 2024", "options": {"count": 15, "safesearch": "moderate"}}'
+  ```
+
+- **Optimized Search** - Programming languages:
+  ```bash
+  curl -X POST https://brave-search-agent.ap-a98.workers.dev/agents/brave-search-agent/default/optimized-search \
+    -H "Content-Type: application/json" \
+    -d '{"query": "best programming languages to learn", "searchOptions": {"count": 12}, "suggestOptions": {"count": 4}}'
+  ```
+
+- **Agentic Search** - Quantum computing explanation:
+  ```bash
+  curl -X POST https://brave-search-agent.ap-a98.workers.dev/agents/brave-search-agent/default/agentic-search \
+    -H "Content-Type: application/json" \
+    -d '{"query": "How does quantum computing work and what are its practical applications?"}'
+  ```
+
+- **Suggest** - Machine learning queries:
+  ```bash
+  curl -X POST https://brave-search-agent.ap-a98.workers.dev/agents/brave-search-agent/default/suggest \
+    -H "Content-Type: application/json" \
+    -d '{"query": "machine learn", "options": {"count": 8}}'
+  ```
+
+- **Get State**:
+  ```bash
+  curl -X GET https://brave-search-agent.ap-a98.workers.dev/agents/brave-search-agent/default/state
+  ```
+
+- **Update Preferences** - European settings:
+  ```bash
+  curl -X POST https://brave-search-agent.ap-a98.workers.dev/agents/brave-search-agent/default/preferences \
+    -H "Content-Type: application/json" \
+    -d '{"safesearch": "strict", "count": 25, "country": "DE", "search_lang": "en"}'
+  ```
+
+- **Clear History**:
+  ```bash
+  curl -X POST https://brave-search-agent.ap-a98.workers.dev/agents/brave-search-agent/default/clear-history
   ```
 
 ### WebSocket Interface
@@ -247,19 +296,30 @@ Connect to `/agents/brave-search/default` and send JSON messages:
 
 ## Deployment
 
-Deploy to Cloudflare Workers:
+1. Deploy to Cloudflare Workers:
+   ```bash
+   npm run deploy
+   ```
 
-```bash
-npm run deploy
-```
+2. Set up your API keys as secrets (required for production functionality):
+   ```bash
+   wrangler secret put BRAVE_SEARCH_API_KEY
+   wrangler secret put BRAVE_SUGGEST_API_KEY
+   wrangler secret put GEMINI_API_KEY
+   ```
 
-Make sure to set your API keys in the Cloudflare Workers dashboard or via Wrangler secrets:
+   **Note**: The `.dev.vars` file is only used for local development. Production deployments require secrets to be set separately using the commands above.
 
-```bash
-wrangler secret put BRAVE_SEARCH_API_KEY
-wrangler secret put BRAVE_SUGGEST_API_KEY
-wrangler secret put GEMINI_API_KEY
-```
+3. Your deployed Worker will be available at: `https://brave-search-agent.<your-subdomain>.workers.dev`
+
+### Environment Variables
+
+- **Local Development**: Uses `.dev.vars` file (automatically loaded by `npm run dev`)
+- **Production**: Uses Cloudflare Workers secrets (set via `wrangler secret put`)
+- **Required Keys**:
+  - `BRAVE_SEARCH_API_KEY`: For web search functionality
+  - `BRAVE_SUGGEST_API_KEY`: For query suggestions
+  - `GEMINI_API_KEY`: For AI-powered agentic search
 
 ## Configuration
 

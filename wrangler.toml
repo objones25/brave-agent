@@ -3,11 +3,6 @@ main = "src/index.ts"
 compatibility_date = "2023-12-01"
 compatibility_flags = ["nodejs_compat"]
 
-[vars]
-BRAVE_SEARCH_API_KEY = ""
-BRAVE_SUGGEST_API_KEY = ""
-GEMINI_API_KEY = ""
-
 # Standard Durable Object binding syntax
 [[durable_objects.bindings]]
 name = "BRAVE_SEARCH_AGENT"
