@@ -1,447 +1,154 @@
-# Brave Search Agent for Cloudflare Workers
+# Brave Search Agent
 
-A Cloudflare Workers AI agent that provides search capabilities using the Brave Search API. This agent can be interacted with via HTTP requests or WebSockets.
+A Cloudflare Workers API that provides multiple search modes powered by the Brave Search API and Google Gemini 3.1 Flash-Lite.
 
-## Current Implementation Status
+## Endpoints
 
-The agent is fully functional with robust parameter handling, type validation, and detailed performance logging. Recent improvements include:
+All endpoints accept `POST` requests with a JSON body.
 
-- **Comprehensive Logging System**: Added detailed logging throughout the application with timing measurements for each step of the search process
-- **Performance Metrics**: Implemented timing measurements for all API calls, data processing, and result merging operations
-- **Type Validation Fixes**: Implemented automatic conversion between string parameters and their expected types (numbers, booleans, arrays)
-- **Empty Value Handling**: Added special handling for empty values to prevent API validation errors
-- **Parameter Filtering**: Improved parameter processing to ensure only valid values are sent to the Brave Search API
+### `POST /search`
 
-## Features
+Standard web search.
 
-- Multiple search modes:
-  - **Direct Search**: Standard web search using Brave Search API
-  - **Optimized Search**: Enhanced search using query suggestions to improve results
-  - **Agentic Search**: AI-powered search using Google's Gemini Pro model
-  - **AI Search**: AI-powered search with configurable optimization and graceful error handling
-- Get query suggestions from Brave Suggest API
-- Detailed performance logging with timing information for each step
-- Customize search parameters (count, safesearch, country, etc.)
-- Maintain conversation history and recent searches
-- User preference management
-- Support for both HTTP and WebSocket interfaces
-- Powered by Cloudflare Workers AI and Google's Gemini Pro
+```json
+{
+  "query": "your search query",
+  "options": {
+    "count": 10,
+    "safesearch": "moderate",
+    "country": "US",
+    "result_filter": "web,news"
+  }
+}
+```
 
-## Prerequisites
+### `POST /optimized`
 
-- [Node.js](https://nodejs.org/) (v16 or later)
-- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/install-and-update/) (v4 or later)
-- A Cloudflare account
-- A Brave Search API key (get one from [Brave Search API](https://brave.com/search/api/))
-- A Brave Suggest API key (get one from [Brave Search API](https://brave.com/search/api/))
-- A Google Gemini API key (for agentic search functionality)
+AI-optimized search. Uses Gemini to rewrite the query and generate alternative queries, then fans out multiple searches and merges the results.
+
+```json
+{
+  "query": "your search query",
+  "options": {
+    "count": 10,
+    "safesearch": "moderate"
+  }
+}
+```
+
+### `POST /agentic`
+
+Agentic search. Gemini autonomously decides what to search for, calls Brave Search as a tool (up to 5 times), and synthesizes a final answer with citations. Uses Gemini 3's thought signatures to maintain reasoning context across multi-turn function calls.
+
+```json
+{
+  "query": "your search query"
+}
+```
+
+### `POST /ai`
+
+Single-shot AI search. Runs a standard search and passes results to Gemini for synthesis.
+
+```json
+{
+  "query": "your search query",
+  "options": {
+    "count": 10,
+    "safesearch": "moderate"
+  }
+}
+```
+
+### Search Options
+
+All `/search`, `/optimized`, and `/ai` endpoints accept an optional `options` object:
+
+| Parameter                | Type                            | Description                                                                  |
+| ------------------------ | ------------------------------- | ---------------------------------------------------------------------------- |
+| `count`                  | `number` (1–20)                 | Number of results                                                            |
+| `offset`                 | `number` (0–9)                  | Pagination offset                                                            |
+| `country`                | `string`                        | 2-char country code (e.g. `"US"`)                                            |
+| `search_lang`            | `string`                        | Language code (e.g. `"en"`)                                                  |
+| `ui_lang`                | `string`                        | UI language (e.g. `"en-US"`)                                                 |
+| `safesearch`             | `"off"` `"moderate"` `"strict"` | Content filter                                                               |
+| `freshness`              | `"pd"` `"pw"` `"pm"` `"py"`     | Time filter: past day/week/month/year. Also accepts `YYYY-MM-DDtoYYYY-MM-DD` |
+| `result_filter`          | `string`                        | Comma-separated types: `web,news,faq,discussions,videos,locations`           |
+| `units`                  | `"metric"` `"imperial"`         | Measurement units                                                            |
+| `goggles`                | `string[]`                      | Custom re-ranking goggles                                                    |
+| `extra_snippets`         | `boolean`                       | Up to 5 additional snippets per result                                       |
+| `summary`                | `boolean`                       | Enable summarizer key generation                                             |
+| `text_decorations`       | `boolean`                       | Include highlight markers in snippets                                        |
+| `spellcheck`             | `boolean`                       | Enable spell check                                                           |
+| `enable_rich_callback`   | `boolean`                       | Enable rich result callbacks                                                 |
+| `include_fetch_metadata` | `boolean`                       | Include fetch metadata                                                       |
+| `operators`              | `boolean`                       | Apply search operators                                                       |
 
 ## Setup
 
-1. Clone this repository:
-   ```bash
-   git clone https://github.com/yourusername/brave-search-agent.git
-   cd brave-search-agent
-   ```
+### Prerequisites
 
-2. Install dependencies:
+- [Node.js](https://nodejs.org/) v18+
+- [Wrangler](https://developers.cloudflare.com/workers/wrangler/) v4+
+- Brave Search API key — [brave.com/search/api](https://brave.com/search/api/)
+- Google Gemini API key — requires access to `gemini-3.1-flash-lite-preview`
+
+### Local Development
+
+1. Install dependencies:
+
    ```bash
    npm install
    ```
 
-3. Create a `.dev.vars` file with your API keys:
+2. Create `.dev.vars`:
+
    ```
-   BRAVE_SEARCH_API_KEY=your_brave_search_api_key_here
-   BRAVE_SUGGEST_API_KEY=your_brave_suggest_api_key_here
-   GEMINI_API_KEY=your_google_gemini_api_key_here
+   BRAVE_SEARCH_API_KEY=your_brave_search_api_key
+   GEMINI_API_KEY=your_gemini_api_key
    ```
 
-4. Start the development server:
+3. Start the dev server:
    ```bash
    npm run dev
    ```
 
-## Usage
+The worker will be available at `http://localhost:8787`.
 
-### HTTP Endpoints
+### Deployment
 
-- **Direct Search**: `POST /agents/brave-search-agent/default/search`
-  ```json
-  {
-    "query": "your search query",
-    "options": {
-      "safesearch": "moderate",
-      "count": 10,
-      "country": "US"
-    }
-  }
-  ```
+1. Set production secrets:
 
-- **Optimized Search**: `POST /agents/brave-search-agent/default/optimized-search`
-  ```json
-  {
-    "query": "your search query",
-    "searchOptions": {
-      "safesearch": "moderate",
-      "count": 10,
-      "country": "US"
-    },
-    "suggestOptions": {
-      "count": 3,
-      "country": "US"
-    }
-  }
-  ```
+   ```bash
+   wrangler secret put BRAVE_SEARCH_API_KEY
+   wrangler secret put GEMINI_API_KEY
+   ```
 
-- **Agentic Search**: `POST /agents/brave-search-agent/default/agentic-search`
-  ```json
-  {
-    "query": "your search query",
-    "preferences": {
-      "safesearch": "moderate",
-      "country": "US"
-    }
-  }
-  ```
-
-- **AI Search**: `POST /agents/brave-search-agent/default/ai-search`
-  ```json
-  {
-    "query": "your search query",
-    "options": {
-      "safesearch": "moderate",
-      "count": 10,
-      "country": "US"
-    },
-    "optimize": true
-  }
-  ```
-
-- **Suggest**: `POST /agents/brave-search-agent/default/suggest`
-  ```json
-  {
-    "query": "your query prefix",
-    "options": {
-      "count": 5,
-      "country": "US"
-    }
-  }
-  ```
-
-- **Get State**: `GET /agents/brave-search-agent/default/state`
-
-- **Update Preferences**: `POST /agents/brave-search-agent/default/preferences`
-  ```json
-  {
-    "safesearch": "strict",
-    "count": 20,
-    "country": "GB"
-  }
-  ```
-
-- **Clear History**: `POST /agents/brave-search-agent/default/clear-history`
-
-### Local Development Examples
-
-- **Direct Search**:
-  ```bash
-  curl -X POST http://localhost:8787/agents/brave-search-agent/default/search \
-    -H "Content-Type: application/json" \
-    -d '{"query": "weather in San Francisco", "options": {"count": 10, "safesearch": "moderate"}}'
-  ```
-
-- **Optimized Search**:
-  ```bash
-  curl -X POST http://localhost:8787/agents/brave-search-agent/default/optimized-search \
-    -H "Content-Type: application/json" \
-    -d '{"query": "weather in San Francisco", "searchOptions": {"count": 10}, "suggestOptions": {"count": 3}}'
-  ```
-
-- **Agentic Search**:
-  ```bash
-  curl -X POST http://localhost:8787/agents/brave-search-agent/default/agentic-search \
-    -H "Content-Type: application/json" \
-    -d '{"query": "What are the best restaurants in New York City?"}'
-  ```
-
-- **AI Search**:
-  ```bash
-  curl -X POST http://localhost:8787/agents/brave-search-agent/default/ai-search \
-    -H "Content-Type: application/json" \
-    -d '{"query": "What are the benefits of renewable energy?", "options": {"count": 15, "safesearch": "moderate"}}'
-  ```
-
-- **AI Search with optimization disabled**:
-  ```bash
-  curl -X POST "http://localhost:8787/agents/brave-search-agent/default/ai-search?optimize=false" \
-    -H "Content-Type: application/json" \
-    -d '{"query": "What are the benefits of renewable energy?"}'
-  ```
-
-- **Suggest**:
-  ```bash
-  curl -X POST http://localhost:8787/agents/brave-search-agent/default/suggest \
-    -H "Content-Type: application/json" \
-    -d '{"query": "weather in", "options": {"count": 5}}'
-  ```
-
-- **Get State**:
-  ```bash
-  curl -X GET http://localhost:8787/agents/brave-search-agent/default/state
-  ```
-
-- **Update Preferences**:
-  ```bash
-  curl -X POST http://localhost:8787/agents/brave-search-agent/default/preferences \
-    -H "Content-Type: application/json" \
-    -d '{"safesearch": "strict", "count": 20, "country": "GB"}'
-  ```
-
-- **Clear History**:
-  ```bash
-  curl -X POST http://localhost:8787/agents/brave-search-agent/default/clear-history
-  ```
-
-### Production API Examples
-
-**Note**: These examples use the deployed Worker. Make sure you have set up your API keys using `wrangler secret put` as described in the Deployment section.
-
-- **Direct Search** - Latest AI developments:
-  ```bash
-  curl -X POST https://brave-search-agent.ap-a98.workers.dev/agents/brave-search-agent/default/search \
-    -H "Content-Type: application/json" \
-    -d '{"query": "latest AI developments 2024", "options": {"count": 15, "safesearch": "moderate"}}'
-  ```
-
-- **Optimized Search** - Programming languages:
-  ```bash
-  curl -X POST https://brave-search-agent.ap-a98.workers.dev/agents/brave-search-agent/default/optimized-search \
-    -H "Content-Type: application/json" \
-    -d '{"query": "best programming languages to learn", "searchOptions": {"count": 12}, "suggestOptions": {"count": 4}}'
-  ```
-
-- **Agentic Search** - Quantum computing explanation:
-  ```bash
-  curl -X POST https://brave-search-agent.ap-a98.workers.dev/agents/brave-search-agent/default/agentic-search \
-    -H "Content-Type: application/json" \
-    -d '{"query": "How does quantum computing work and what are its practical applications?"}'
-  ```
-
-- **AI Search** - Climate change analysis:
-  ```bash
-  curl -X POST https://brave-search-agent.ap-a98.workers.dev/agents/brave-search-agent/default/ai-search \
-    -H "Content-Type: application/json" \
-    -d '{"query": "What are the latest developments in climate change mitigation?", "options": {"count": 20, "safesearch": "moderate"}}'
-  ```
-
-- **AI Search with optimization disabled** - Technology trends:
-  ```bash
-  curl -X POST "https://brave-search-agent.ap-a98.workers.dev/agents/brave-search-agent/default/ai-search?optimize=false" \
-    -H "Content-Type: application/json" \
-    -d '{"query": "What are the emerging technology trends for 2025?"}'
-  ```
-
-- **Suggest** - Machine learning queries:
-  ```bash
-  curl -X POST https://brave-search-agent.ap-a98.workers.dev/agents/brave-search-agent/default/suggest \
-    -H "Content-Type: application/json" \
-    -d '{"query": "machine learn", "options": {"count": 8}}'
-  ```
-
-- **Get State**:
-  ```bash
-  curl -X GET https://brave-search-agent.ap-a98.workers.dev/agents/brave-search-agent/default/state
-  ```
-
-- **Update Preferences** - European settings:
-  ```bash
-  curl -X POST https://brave-search-agent.ap-a98.workers.dev/agents/brave-search-agent/default/preferences \
-    -H "Content-Type: application/json" \
-    -d '{"safesearch": "strict", "count": 25, "country": "DE", "search_lang": "en"}'
-  ```
-
-- **Clear History**:
-  ```bash
-  curl -X POST https://brave-search-agent.ap-a98.workers.dev/agents/brave-search-agent/default/clear-history
-  ```
-
-### WebSocket Interface
-
-Connect to `/agents/brave-search/default` and send JSON messages:
-
-- **Direct Search Request**:
-  ```json
-  {
-    "type": "search_request",
-    "query": "your search query",
-    "options": {
-      "safesearch": "moderate",
-      "count": 10
-    }
-  }
-  ```
-
-- **Optimized Search Request**:
-  ```json
-  {
-    "type": "optimized_search_request",
-    "query": "your search query",
-    "searchOptions": {
-      "safesearch": "moderate",
-      "count": 10
-    },
-    "suggestOptions": {
-      "count": 3
-    }
-  }
-  ```
-
-- **Agentic Search Request**:
-  ```json
-  {
-    "type": "agentic_search_request",
-    "query": "What are the best restaurants in New York City?",
-    "preferences": {
-      "safesearch": "moderate"
-    }
-  }
-  ```
-
-- **AI Search Request**:
-  ```json
-  {
-    "type": "ai_search_request",
-    "query": "What are the benefits of renewable energy?",
-    "options": {
-      "safesearch": "moderate",
-      "count": 10
-    },
-    "optimize": true
-  }
-  ```
-
-- **Suggest Request**:
-  ```json
-  {
-    "type": "suggest_request",
-    "query": "weather in",
-    "options": {
-      "count": 5
-    }
-  }
-  ```
-
-- **Update Preferences**:
-  ```json
-  {
-    "type": "update_preferences",
-    "preferences": {
-      "safesearch": "strict",
-      "count": 20
-    }
-  }
-  ```
-
-- **Clear History**:
-  ```json
-  {
-    "type": "clear_history"
-  }
-  ```
-
-## Deployment
-
-1. Deploy to Cloudflare Workers:
+2. Deploy:
    ```bash
    npm run deploy
    ```
 
-2. Set up your API keys as secrets (required for production functionality):
-   ```bash
-   wrangler secret put BRAVE_SEARCH_API_KEY
-   wrangler secret put BRAVE_SUGGEST_API_KEY
-   wrangler secret put GEMINI_API_KEY
-   ```
+## Example curl Commands
 
-   **Note**: The `.dev.vars` file is only used for local development. Production deployments require secrets to be set separately using the commands above.
+```bash
+# Standard search
+curl -X POST http://localhost:8787/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "cloudflare workers", "options": {"count": 10}}'
 
-3. Your deployed Worker will be available at: `https://brave-search-agent.<your-subdomain>.workers.dev`
+# Optimized search
+curl -X POST http://localhost:8787/optimized \
+  -H "Content-Type: application/json" \
+  -d '{"query": "best practices for typescript"}'
 
-### Environment Variables
+# Agentic search
+curl -X POST http://localhost:8787/agentic \
+  -H "Content-Type: application/json" \
+  -d '{"query": "what happened at google io 2025"}'
 
-- **Local Development**: Uses `.dev.vars` file (automatically loaded by `npm run dev`)
-- **Production**: Uses Cloudflare Workers secrets (set via `wrangler secret put`)
-- **Required Keys**:
-  - `BRAVE_SEARCH_API_KEY`: For web search functionality
-  - `BRAVE_SUGGEST_API_KEY`: For query suggestions
-  - `GEMINI_API_KEY`: For AI-powered agentic search
-
-## Configuration
-
-The agent's behavior can be customized by modifying the following:
-
-- **Search Parameters**: Edit the `braveSearchSchema` in `src/types/index.ts` to add or modify search parameters.
-- **Suggest Parameters**: Edit the `braveSuggestSchema` in `src/types/index.ts` to modify suggestion parameters.
-- **System Prompt**: Modify the `SYSTEM_PROMPT` in `src/config/index.ts` to change how the AI responds to queries.
-- **Default Preferences**: Update the `INITIAL_STATE` object in `src/config/index.ts` to change default search preferences.
-- **Logging Format**: Modify the logging prefixes and formats in the various files to customize the logging output.
-
-## Performance Logging
-
-The agent now includes comprehensive performance logging throughout the codebase:
-
-### Logging Format
-
-All logs follow a consistent format with prefixes to indicate the type of log:
-
-- `[TIMING]`: Logs execution time for specific operations
-- `[SEARCH]`: Logs search-related information
-- `[BRAVE_SEARCH]`: Logs information about Brave Search API calls
-- `[BRAVE_SUGGEST]`: Logs information about Brave Suggest API calls
-- `[MERGE]`: Logs information about result merging operations
-- `[AGENTIC]`: Logs information about AI-powered search operations
-- `[AI_SEARCH]`: Logs information about AI search operations
-- `[ERROR]`: Logs error information
-
-### Example Log Output
-
+# AI search
+curl -X POST http://localhost:8787/ai \
+  -H "Content-Type: application/json" \
+  -d '{"query": "how does WASM work", "options": {"count": 15}}'
 ```
-[SEARCH] Direct search started for: "weather in San Francisco"
-[SEARCH] Direct search options: {"count":10,"safesearch":"moderate"}
-[TIMING] Direct search - Update history: 5ms
-[BRAVE_SEARCH] Search started for: "weather in San Francisco"
-[BRAVE_SEARCH] Search options: {"count":10,"safesearch":"moderate"}
-[TIMING] Brave search - Process parameters: 2ms
-[TIMING] Brave search - Build URL: 1ms
-[BRAVE_SEARCH] URL: https://api.search.brave.com/res/v1/web/search?q=weather%20in%20San%20Francisco&count=10&safesearch=moderate
-[TIMING] Brave search - Fetch request: 320ms
-[TIMING] Brave search - Parse JSON: 15ms
-[TIMING] Brave search - Process results: 8ms
-[TIMING] Brave search - Total execution time: 346ms
-[BRAVE_SEARCH] Results: 10 web results, 10 total results
-[TIMING] Direct search - API call: 350ms
-[TIMING] Direct search - Total execution time: 360ms
-[SEARCH] Direct search results: 10 web results, 10 total results
-```
-
-### Type Validation and Parameter Handling
-
-The agent includes robust type validation and parameter handling to ensure compatibility with various client implementations:
-
-#### Parameter Processing
-
-The parameter processing utilities ensure that all parameters are correctly formatted before being sent to the Brave Search API:
-
-```typescript
-// Process parameters and build URL
-const paramsStartTime = Date.now();
-const processedParams = processSearchParameters(options);
-const paramsEndTime = Date.now();
-console.log(`[TIMING] Brave search - Process parameters: ${paramsEndTime - paramsStartTime}ms`);
-```
-
-These implementations ensure that the agent can handle parameters passed as strings (common in HTTP requests and JSON) while still validating them against the expected types.
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
