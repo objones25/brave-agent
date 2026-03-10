@@ -1,13 +1,10 @@
 name = "brave-search-agent"
 main = "src/index.ts"
-compatibility_date = "2023-12-01"
+compatibility_date = "2025-09-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Standard Durable Object binding syntax
-[[durable_objects.bindings]]
-name = "BRAVE_SEARCH_AGENT"
-class_name = "BraveSearchAgent"
-
-[[migrations]]
-tag = "v1"
-new_sqlite_classes = ["BraveSearchAgent"]
+[[unsafe.bindings]]
+name = "RATE_LIMITER"
+type = "ratelimit"
+namespace_id = "1001"
+simple = { limit = 60, period = 60 }

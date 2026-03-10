@@ -1,61 +1,52 @@
 import { z } from "zod";
 
-// State interfaces
-export interface BraveSearchState {
-  recentSearches: Array<{
-    query: string;
-    timestamp: number;
-  }>;
-  conversationHistory: Array<{
-    role: "user" | "assistant";
-    content: string;
-    timestamp: number;
-  }>;
-  preferences: {
-    safesearch: "off" | "moderate" | "strict";
-    count: number;
-    country: string;
-    text_decorations?: boolean;
-    spellcheck?: boolean;
-    units?: "metric" | "imperial";
-    extra_snippets?: boolean;
-    summary?: boolean;
-    result_filter?: string;
-  };
-}
+// ── Search Options ────────────────────────────────────────────────────────────
 
-// Web Search API Types
-export interface SearchOptions {
-  count?: number;
-  offset?: number;
-  country?: string;
-  search_lang?: string;
-  safesearch?: "off" | "moderate" | "strict";
-  freshness?: string;
-  text_decorations?: boolean;
-  spellcheck?: boolean;
-  result_filter?: string;
-  goggles_id?: string;
-  goggles?: string[] | string;
-  units?: "metric" | "imperial";
-  extra_snippets?: boolean;
-  summary?: boolean;
-  ui_lang?: string;
-}
+export const SearchOptionsSchema = z.object({
+  count: z.number().int().min(1).max(20).optional(),
+  offset: z.number().int().min(0).max(9).optional(),
+  country: z.string().optional(),
+  search_lang: z.string().optional(),
+  safesearch: z.enum(["off", "moderate", "strict"]).optional(),
+  freshness: z.string().optional(),
+  text_decorations: z.boolean().optional(),
+  spellcheck: z.boolean().optional(),
+  result_filter: z.string().optional(),
+  goggles_id: z.string().optional(),
+  goggles: z.array(z.string()).optional(),
+  units: z.enum(["metric", "imperial"]).optional(),
+  extra_snippets: z.boolean().optional(),
+  summary: z.boolean().optional(),
+  ui_lang: z.string().optional(),
+  enable_rich_callback: z.boolean().optional(),
+  include_fetch_metadata: z.boolean().optional(),
+  operators: z.boolean().optional(),
+});
 
-export interface SearchResult {
-  query: string;
-  alteredQuery?: string;
-  totalResults: number;
-  webResults: WebResult[];
-  newsResults: NewsResult[];
-  videoResults: VideoResult[];
-  faqResults: FaqResult[];
-  discussionResults: DiscussionResult[];
-  locationsResults: LocationResult[];
-  infobox: InfoboxResult | null;
-  summary: SummaryResult | null;
-}
+export type SearchOptions = z.infer<typeof SearchOptionsSchema>;
+
+// ── Request Schemas ───────────────────────────────────────────────────────────
+
+export const SearchRequestSchema = z.object({
+  query: z.string().min(1).max(400),
+  options: SearchOptionsSchema.optional(),
+});
+
+export const OptimizedRequestSchema = z.object({
+  query: z.string().min(1).max(400),
+  options: SearchOptionsSchema.optional(),
+});
+
+export const AgenticRequestSchema = z.object({
+  query: z.string().min(1).max(400),
+});
+
+export const AiRequestSchema = z.object({
+  query: z.string().min(1).max(400),
+  options: SearchOptionsSchema.optional(),
+});
+
+// ── Result Types ──────────────────────────────────────────────────────────────
 
 export interface WebResult {
   title: string;
@@ -114,11 +105,16 @@ export interface LocationResult {
   distance?: string;
 }
 
+export interface InfoboxAttribute {
+  label: string;
+  value: string;
+}
+
 export interface InfoboxResult {
   type: string;
   title: string;
   description: string;
-  attributes: any[];
+  attributes: InfoboxAttribute[];
   thumbnail?: string;
 }
 
@@ -126,92 +122,131 @@ export interface SummaryResult {
   key: string;
 }
 
-// Suggest API Types
-export interface SuggestOptions {
-  country?: string;  // 2-character country code
-  lang?: string;     // 2+ character language code
-  count?: number;    // Number of suggestions (max 20)
-  rich?: boolean;    // Whether to enhance suggestions with rich results
-}
-
-export interface SuggestResponse {
-  type: 'suggest';
-  query: {
-    original: string;
-  };
-  results: SuggestResult[];
-}
-
-export interface SuggestResult {
+export interface SearchResult {
   query: string;
-  is_entity: boolean;
-  title?: string;
-  description?: string;
-  img?: string;
+  alteredQuery?: string;
+  totalResults: number;
+  webResults: WebResult[];
+  newsResults: NewsResult[];
+  videoResults: VideoResult[];
+  faqResults: FaqResult[];
+  discussionResults: DiscussionResult[];
+  locationsResults: LocationResult[];
+  infobox: InfoboxResult | null;
+  summary: SummaryResult | null;
 }
 
-// Zod Schemas
-export const braveSearchSchema = z.object({
-  query: z.string().describe("The user's search query term. Should be concise and focused on the key aspects of what you're looking for. Maximum of 400 characters and 50 words."),
-  count: z.union([z.string().transform(val => parseInt(val, 10)), z.number()])
-    .optional()
-    .describe("Number of search results to return (maximum 20, default 10). Use a higher number for broad topics and a lower number for specific queries."),
-  offset: z.union([z.string().transform(val => parseInt(val, 10)), z.number()])
-    .optional()
-    .describe("Results page offset (maximum 9, default 0). Use with count for pagination of results."),
-  country: z.string().optional().describe("Two-letter country code to focus search results (e.g., 'US', 'GB', 'DE'). Use when searching for region-specific information."),
-  search_lang: z.string().optional().describe("Two or more character language code for search results (e.g., 'en', 'fr', 'de'). Use when searching for content in a specific language."),
-  safesearch: z.enum(["off", "moderate", "strict"]).optional().describe("Content filtering level: 'off' (no filtering), 'moderate' (filters explicit images/videos), or 'strict' (all adult content filtered)."),
-  freshness: z.string().optional().describe("Filter by content age: 'pd' (past day), 'pw' (past week), 'pm' (past month), 'py' (past year), or date range like '2022-04-01to2022-07-30'."),
-  
-  // Additional parameters
-  text_decorations: z.union([
-    z.string().transform(val => val === 'true' ? true : val === 'false' ? false : Boolean(val)),
-    z.boolean()
-  ]).optional().describe("Whether display strings (e.g. result snippets) should include decoration markers (e.g. highlighting characters). Default is true."),
-  spellcheck: z.union([
-    z.string().transform(val => val === 'true' ? true : val === 'false' ? false : Boolean(val)),
-    z.boolean()
-  ]).optional().describe("Whether to spellcheck the provided query. If enabled, the modified query is always used for search. The modified query can be found in the 'altered' key in the response."),
-  result_filter: z.string().optional().describe("Comma-delimited string of result types to include (e.g., 'discussions,videos,web'). Available values: discussions, faq, infobox, news, query, summarizer, videos, web, locations."),
-  goggles_id: z.string().optional().describe("(Deprecated) Goggle ID for custom re-ranking of search results. Use the goggles parameter instead."),
-  goggles: z.union([
-    z.string().transform(val => {
-      try {
-        return JSON.parse(val);
-      } catch {
-        return val.split(',').filter(Boolean);
-      }
-    }),
-    z.array(z.string())
-  ]).optional().describe("Custom re-ranking rules for search results. Can be a URL where the Goggle is hosted or the definition of the Goggle."),
-  units: z.union([
-    z.string().transform(val => {
-      if (val === '') return undefined;
-      return val;
-    }),
-    z.enum(["metric", "imperial"])
-  ]).optional().describe("Measurement units to use in results. If not provided, units are derived from the search country."),
-  extra_snippets: z.union([
-    z.string().transform(val => val === 'true' ? true : val === 'false' ? false : Boolean(val)),
-    z.boolean()
-  ]).optional().describe("Allows retrieval of up to 5 additional, alternative excerpts from search result pages."),
-  summary: z.union([
-    z.string().transform(val => val === 'true' ? true : val === 'false' ? false : Boolean(val)),
-    z.boolean()
-  ]).optional().describe("Enables summary key generation in web search results. Required for the summarizer to be enabled."),
-  ui_lang: z.string().optional().describe("User interface language preferred in response, usually in format '<language_code>-<country_code>' (e.g., 'en-US')."),
+// ── Query Optimization ────────────────────────────────────────────────────────
+
+export const QueryOptimizationSchema = z.object({
+  optimizedQuery: z.string().describe("Primary optimized search query"),
+  alternativeQueries: z
+    .array(z.string())
+    .min(1)
+    .max(3)
+    .describe("2-3 alternative queries covering different angles"),
+  searchParams: z.object({
+    freshness: z
+      .enum(["pd", "pw", "pm", "py"])
+      .optional()
+      .describe("Time filter if query is time-sensitive"),
+    resultFilter: z
+      .string()
+      .optional()
+      .describe(
+        "Comma-separated result types: web,news,faq,discussions,videos,locations"
+      ),
+    country: z
+      .string()
+      .optional()
+      .describe("2-char country code if region-specific"),
+  }),
+  intent: z
+    .enum([
+      "informational",
+      "navigational",
+      "transactional",
+      "commercial",
+      "local",
+    ])
+    .describe("Classified search intent"),
 });
 
-export const braveSuggestSchema = z.object({
-  query: z.string().describe("The user's suggest search query term. Maximum of 400 characters and 50 words."),
-  country: z.string().optional().describe("Two-letter country code to focus suggestions (e.g., 'US', 'GB', 'DE')."),
-  lang: z.string().optional().describe("Two or more character language code for suggestions (e.g., 'en', 'fr', 'de')."),
-  count: z.union([z.string().transform(val => parseInt(val, 10)), z.number()])
-    .optional()
-    .describe("Number of suggestions to return (maximum 20, default 5)."),
-  rich: z.union([
-    z.string().transform(val => val === 'true' ? true : val === 'false' ? false : Boolean(val)),
-    z.boolean()
-  ]).optional().describe("Whether to enhance suggestions with rich results.")
-});
+export type QueryOptimization = z.infer<typeof QueryOptimizationSchema>;
+
+// ── Raw Brave API Response Types (for type narrowing) ─────────────────────────
+
+export interface RawWebResult {
+  title?: unknown;
+  url?: unknown;
+  description?: unknown;
+  meta_url?: { hostname?: unknown };
+  extra_snippets?: unknown[];
+  age?: unknown;
+}
+
+export interface RawNewsResult {
+  title?: unknown;
+  url?: unknown;
+  description?: unknown;
+  source?: unknown;
+  meta_url?: { hostname?: unknown };
+  age?: unknown;
+  breaking?: unknown;
+}
+
+export interface RawVideoResult {
+  title?: unknown;
+  url?: unknown;
+  description?: unknown;
+  meta_url?: { hostname?: unknown };
+  video?: { duration?: unknown };
+  thumbnail?: { src?: unknown };
+}
+
+export interface RawFaqResult {
+  question?: unknown;
+  answer?: unknown;
+  title?: unknown;
+  url?: unknown;
+  meta_url?: { hostname?: unknown };
+}
+
+export interface RawDiscussionResult {
+  title?: unknown;
+  url?: unknown;
+  description?: unknown;
+  data?: {
+    forum_name?: unknown;
+    num_answers?: unknown;
+    score?: unknown;
+    question?: unknown;
+    top_comment?: unknown;
+  };
+}
+
+export interface RawLocationResult {
+  title?: unknown;
+  id?: unknown;
+  coordinates?: { lat?: unknown; lng?: unknown };
+  postal_address?: { displayAddress?: unknown };
+  categories?: unknown[];
+  rating?: { ratingValue?: unknown; reviewCount?: unknown };
+  distance?: { value?: unknown; units?: unknown };
+}
+
+// ── Cloudflare Rate Limiter ───────────────────────────────────────────────────
+
+export interface RateLimitBinding {
+  limit(options: { key: string }): Promise<{ success: boolean }>;
+}
+
+// ── Env ───────────────────────────────────────────────────────────────────────
+
+export type Env = {
+  Bindings: {
+    BRAVE_SEARCH_API_KEY: string;
+    GEMINI_API_KEY: string;
+    RATE_LIMITER: RateLimitBinding;
+  };
+};
